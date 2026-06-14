@@ -3,10 +3,11 @@ package com.carbulab.controller;
 import com.carbulab.service.PdfOsService;
 import com.carbulab.service.PdfRelVeiculoService;
 import com.carbulab.utils.ConsultaPorPlaca;
+import com.carbulab.exception.PlacaConflictException;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.dao.DataAccessException;
 import org.springframework.dao.EmptyResultDataAccessException;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -102,99 +103,6 @@ public class ApiController {
         return response;
     }
 
-    // --- CLIENTES ---
-    @GetMapping("/clientes")
-    public List<Map<String, Object>> listarClientes() {
-        return db.queryForList("SELECT cod_cliente, nome_cliente, cpf_cnpj, celular, telefone, email FROM tb_cliente");
-    }
-
-    @GetMapping("/clientes/search")
-    public List<Map<String, Object>> buscarClientes(@RequestParam String term, @RequestParam String type) {
-        String sql;
-        List<Object> params = new ArrayList<>();
-        if ("placa".equals(type)) {
-            sql = "SELECT DISTINCT c.cod_cliente, c.nome_cliente, c.cpf_cnpj, c.celular, c.telefone, c.email, v.placa as placa_encontrada " +
-                  "FROM tb_cliente c JOIN tb_veiculo v ON c.cod_cliente = v.fk_cod_cliente WHERE ";
-            String placaLimpa = term.replaceAll("[^a-zA-Z0-9]", "").toUpperCase();
-            String placaConvertida = ConsultaPorPlaca.adaptaPlacaParaFormatoMercosul(placaLimpa);
-            sql += "(UPPER(REPLACE(REPLACE(v.placa, '-', ''), ' ', '')) LIKE ? ";
-            params.add("%" + placaLimpa + "%");
-            if (placaConvertida != null && !placaConvertida.equals(placaLimpa)) {
-                sql += "OR UPPER(REPLACE(REPLACE(v.placa, '-', ''), ' ', '')) LIKE ? ";
-                params.add("%" + placaConvertida + "%");
-            }
-            sql += ")";
-        } else {
-            sql = "SELECT DISTINCT c.cod_cliente, c.nome_cliente, c.cpf_cnpj, c.celular, c.telefone, c.email FROM tb_cliente c WHERE ";
-            if ("nome".equals(type)) {
-                sql += "c.nome_cliente LIKE ?";
-                params.add("%" + term + "%");
-            } else if ("cpf_cnpj".equals(type)) {
-                 sql += "REPLACE(REPLACE(REPLACE(c.cpf_cnpj, '.', ''), '-', ''), '/', '') LIKE ?";
-                 params.add("%" + term.replaceAll("[^0-9]", "") + "%");
-            } else if ("telefone".equals(type)) {
-                 String cleanPhone = term.replaceAll("[^0-9]", "");
-                 sql += "(REPLACE(REPLACE(REPLACE(REPLACE(c.celular, '(', ''), ')', ''), '-', ''), ' ', '') LIKE ? OR " +
-                        "REPLACE(REPLACE(REPLACE(REPLACE(c.telefone, '(', ''), ')', ''), '-', ''), ' ', '') LIKE ?)";
-                 params.add("%" + cleanPhone + "%");
-                 params.add("%" + cleanPhone + "%");
-            } else { return List.of(); }
-        }
-        return db.queryForList(sql, params.toArray());
-    }
-    
-    @GetMapping("/clientes/{id}")
-    public ResponseEntity<?> getCliente(@PathVariable int id) {
-        try {
-            Map<String, Object> cliente = db.queryForMap("SELECT * FROM tb_cliente WHERE cod_cliente = ?", id);
-            Map<String, Object> endFinal = new HashMap<>();
-            
-            if (cliente.get("fk_cod_endereco") != null) {
-                try {
-                    Map<String, Object> rowEnd = db.queryForMap("SELECT * FROM tb_endereco WHERE cod_endereco = ?", cliente.get("fk_cod_endereco"));
-                    
-                    if (rowEnd != null) {
-                        endFinal.put("numero", rowEnd.get("numero"));
-                        endFinal.put("complemento", rowEnd.get("complemento"));
-                        
-                        // CORREÇÃO: Utilizando fk_cod_cep e a primary key cod_cep
-                        Object cepVal = rowEnd.get("fk_cod_cep"); 
-                        
-                        if (cepVal != null) {
-                            try {
-                                Map<String, Object> cepInfo = db.queryForMap("SELECT * FROM tb_cep WHERE cod_cep = ?", cepVal);
-                                if (cepInfo != null) {
-                                    endFinal.put("uf", cepInfo.get("uf"));
-                                    endFinal.put("bairro", cepInfo.get("bairro"));
-                                    endFinal.put("cidade", cepInfo.get("cidade"));
-                                    endFinal.put("logradouro", cepInfo.get("logradouro"));
-                                    endFinal.put("cep", cepInfo.get("cep")); // Armazena cep real formatável no react
-                                }
-                            } catch (Exception ex) {
-                                System.err.println("Aviso: tb_cep ausente ou CEP não encontrado para o cliente " + id);
-                            }
-                        }
-                    }
-                } catch (Exception e) {
-                    System.err.println("Aviso: Falha ao carregar endereço principal: " + e.getMessage());
-                }
-            }
-            
-            List<Map<String, Object>> veiculos = db.queryForList("SELECT * FROM tb_veiculo WHERE fk_cod_cliente = ?", id);
-            
-            Map<String, Object> response = new HashMap<>();
-            response.put("cliente", cliente);
-            response.put("endereco", endFinal);
-            response.put("veiculos", veiculos);
-            
-            return ResponseEntity.ok(response);
-        } catch (EmptyResultDataAccessException e) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Collections.singletonMap("message", "Cliente não encontrado"));
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Collections.singletonMap("message", "Erro ao buscar cliente: " + e.getMessage()));
-        }
-    }
-
     @GetMapping("/clientes/{clientId}/os")
     public List<Map<String, Object>> listarOsDoCliente(@PathVariable int clientId) {
         String sql = "SELECT os.cod_OS, os.data_OS, os.fk_cod_veiculo, v.placa, v.modelo, v.montadora, v.cor, v.ano, c.nome_cliente, os.status_servico, os.valor_pago, " +
@@ -207,111 +115,6 @@ public class ApiController {
         return db.queryForList(sql, clientId);
     }
 
-    @PostMapping("/clientes")
-    public ResponseEntity<?> criarCliente(@RequestBody Map<String, Object> payload) {
-        Map<String, Object> cli = (Map<String, Object>) payload.get("cliente");
-        Map<String, Object> end = (Map<String, Object>) payload.get("endereco");
-
-        try {
-            String cpfCnpjTemp = cli.get("cpf_cnpj") != null ? cli.get("cpf_cnpj").toString().replaceAll("\\D", "") : null;
-            if (cpfCnpjTemp != null && cpfCnpjTemp.isEmpty()) cpfCnpjTemp = null;
-            final String cpfCnpj = cpfCnpjTemp;
-            
-            String dataNascTemp = (String) cli.get("data_nascimento");
-            if (dataNascTemp != null && dataNascTemp.trim().isEmpty()) dataNascTemp = null;
-            final String finalDataNasc = dataNascTemp;
-            Integer newId;
-            
-            if (end != null && end.get("cep") != null && !end.get("cep").toString().isEmpty()) {
-                String cep = end.get("cep").toString().replaceAll("\\D", "");
-                int numero = end.get("numero") != null && !end.get("numero").toString().isEmpty() ? Integer.parseInt(end.get("numero").toString()) : 0;
-                newId = db.execute(
-                    connection -> {
-                        CallableStatement cs = connection.prepareCall("{call InserirClienteComEndereco(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)}");
-                        cs.setString(1, (String) cli.get("nome_cliente")); cs.setString(2, (String) cli.get("email"));
-                        cs.setString(3, (String) cli.get("celular")); cs.setString(4, (String) cli.get("telefone"));
-                        cs.setString(5, cpfCnpj); cs.setString(6, (String) cli.get("rg")); cs.setString(7, finalDataNasc);
-                        cs.setString(8, (String) cli.get("tipo")); cs.setString(9, cep); cs.setString(10, (String) end.get("uf"));
-                        cs.setString(11, (String) end.get("cidade")); cs.setString(12, (String) end.get("bairro"));
-                        cs.setString(13, (String) end.get("logradouro")); cs.setInt(14, numero); cs.setString(15, (String) end.get("complemento"));
-                        cs.registerOutParameter(16, Types.INTEGER); return cs;
-                    },
-                    (CallableStatementCallback<Integer>) cs -> { cs.execute(); return cs.getInt(16); }
-                );
-            } else {
-                newId = db.execute(
-                    connection -> {
-                        CallableStatement cs = connection.prepareCall("{call InserirCliente(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)}");
-                        cs.setString(1, (String) cli.get("nome_cliente")); cs.setString(2, (String) cli.get("email"));
-                        cs.setString(3, (String) cli.get("celular")); cs.setString(4, (String) cli.get("telefone"));
-                        cs.setString(5, cpfCnpj); cs.setString(6, (String) cli.get("rg")); cs.setString(7, finalDataNasc);
-                        cs.setString(8, (String) cli.get("tipo")); cs.setNull(9, Types.INTEGER); cs.registerOutParameter(10, Types.INTEGER);
-                        return cs;
-                    },
-                    (CallableStatementCallback<Integer>) cs -> { cs.execute(); return cs.getInt(10); }
-                );
-            }
-            Map<String, Object> response = new HashMap<>(cli);
-            response.put("cod_cliente", newId);
-            return ResponseEntity.status(201).body(response);
-
-        } catch (DataAccessException e) {
-            if (e.getMessage() != null && e.getMessage().contains("Data de nascimento futura")) return ResponseEntity.status(400).body(Collections.singletonMap("message", "Erro: Data de nascimento futura."));
-            if (e.getMessage() != null && (e.getMessage().contains("Duplicate entry") || e.getMessage().contains("IntegrityConstraintViolation"))) return ResponseEntity.status(400).body(Collections.singletonMap("message", "CPF/CNPJ já cadastrado."));
-            return ResponseEntity.status(500).body(Collections.singletonMap("message", "Erro ao criar cliente: " + e.getMessage()));
-        }
-    }
-
-    @PutMapping("/clientes/{id}")
-    public ResponseEntity<?> atualizarCliente(@PathVariable int id, @RequestBody Map<String, Object> payload) {
-        Map<String, Object> cli = (Map<String, Object>) payload.get("cliente");
-        Map<String, Object> end = (Map<String, Object>) payload.get("endereco");
-        try {
-            String cpfCnpjTemp = cli.get("cpf_cnpj") != null ? cli.get("cpf_cnpj").toString().replaceAll("\\D", "") : null;
-            if (cpfCnpjTemp != null && cpfCnpjTemp.isEmpty()) cpfCnpjTemp = null;
-            final String cpfCnpj = cpfCnpjTemp;
-            
-            String dataNascTemp = (String) cli.get("data_nascimento");
-            if (dataNascTemp != null && dataNascTemp.trim().isEmpty()) dataNascTemp = null;
-            final String dataNasc = dataNascTemp;
-
-            System.out.println(end.get("cep"));
-
-            if (end != null && end.get("cep") != null && !end.get("cep").toString().isEmpty()) {
-                
-                
-
-                String cep = end.get("cep").toString().replaceAll("\\D", "");
-                int numero = end.get("numero") != null && !end.get("numero").toString().isEmpty() ? Integer.parseInt(end.get("numero").toString()) : 0;
-
-                System.out.println(String.format("%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s", id, cli.get("nome_cliente"), cli.get("email"), cli.get("celular"), cli.get("telefone"),
-                    cpfCnpj, cli.get("rg"), dataNasc, cli.get("tipo"), cep, end.get("uf"), 
-                    end.get("cidade"), end.get("bairro"), end.get("logradouro"), numero, end.get("complemento")));
-
-                db.update("call AtualizarClienteComEndereco(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    id, cli.get("nome_cliente"), cli.get("email"), cli.get("celular"), cli.get("telefone"),
-                    cpfCnpj, cli.get("rg"), dataNasc, cli.get("tipo"), cep, end.get("uf"), 
-                    end.get("cidade"), end.get("bairro"), end.get("logradouro"), numero, end.get("complemento")
-                );
-            } else {
-
-                db.update("call AtualizarCliente(?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    id, cli.get("nome_cliente"), cli.get("email"), cli.get("celular"), cli.get("telefone"),
-                    cpfCnpj, cli.get("rg"), dataNasc, cli.get("tipo")
-                );
-            }
-            return ResponseEntity.ok(Collections.singletonMap("message", "Cliente atualizado"));
-        } catch (Exception e) {
-             return ResponseEntity.status(500).body(Collections.singletonMap("message", "Erro ao atualizar: " + e.getMessage()));
-        }
-    }
-    
-    @DeleteMapping("/clientes/{id}")
-    public ResponseEntity<?> deletarCliente(@PathVariable int id) {
-        try { db.update("call DeletarCliente(?)", id); return ResponseEntity.noContent().build(); } 
-        catch (Exception e) { return ResponseEntity.status(500).body(Collections.singletonMap("message", "Erro ao excluir: " + e.getMessage())); }
-    }
-    
     // --- VEÍCULOS ---
     @GetMapping("/veiculos")
     public List<Map<String, Object>> listarVeiculos() {
@@ -331,9 +134,17 @@ public class ApiController {
     }
 
     @PostMapping("/clientes/{clienteId}/veiculos")
-    public ResponseEntity<?> adicionarVeiculo(@PathVariable int clienteId, @RequestBody Map<String, Object> veiculo) {
+    public ResponseEntity<?> adicionarVeiculo(
+            @PathVariable int clienteId,
+            @RequestBody Map<String, Object> veiculo,
+            @RequestParam(defaultValue = "false") boolean force) {
         try {
             String placa = veiculo.get("placa").toString().replaceAll("[^a-zA-Z0-9]", "").toUpperCase();
+
+            // Valida a placa: lança exceção em caso de erro definitivo ou conflito
+            // (apenas pula a verificação de conflito com outros clientes se force=true)
+            validarPlaca(placa, clienteId, force);
+
             Integer veiculoId = db.execute(
                 connection -> {
                     CallableStatement cs = connection.prepareCall("{call InserirVeiculo(?, ?, ?, ?, ?, ?, ?, ?, ?)}");
@@ -345,20 +156,110 @@ public class ApiController {
             );
             Map<String, Object> response = new HashMap<>(veiculo); response.put("cod_veiculo", veiculoId); response.put("fk_cod_cliente", clienteId); response.put("placa", placa);
             return ResponseEntity.status(201).body(response);
+        } catch (PlacaConflictException e) {
+            // Relança para ser tratado pelo GlobalExceptionHandler (409 com body rico)
+            throw e;
         } catch (Exception e) {
             if (e.getMessage() != null && e.getMessage().contains("Ano de fabricação futuro")) return ResponseEntity.status(400).body(Collections.singletonMap("message", "Erro: Ano de fabricação futuro."));
+            if (e.getMessage() != null && e.getMessage().contains("Já existe um veículo")) return ResponseEntity.badRequest().body(Collections.singletonMap("message", e.getMessage()));
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Collections.singletonMap("message", "Erro ao criar veículo: " + e.getMessage()));
         }
     }
     
     @PutMapping("/veiculos/{id}")
-    public ResponseEntity<?> atualizarVeiculo(@PathVariable int id, @RequestBody Map<String, Object> veiculo) {
+    public ResponseEntity<?> atualizarVeiculo(
+            @PathVariable int id,
+            @RequestBody Map<String, Object> veiculo,
+            @RequestParam int clienteId,
+            @RequestParam(defaultValue = "false") boolean force) {
         try {
             String placa = veiculo.get("placa").toString().replaceAll("[^a-zA-Z0-9]", "").toUpperCase();
+
+            // Busca a placa atual do veículo para detectar se houve mudança
+            String placaAtual = db.queryForObject(
+                "SELECT UPPER(REPLACE(REPLACE(placa, '-', ''), ' ', '')) FROM tb_veiculo WHERE cod_veiculo = ?",
+                String.class, id);
+
+            // Só executa a validação se a placa realmente mudou
+            // (evita falso positivo ao salvar sem alterar a placa)
+            // Considera também placa no formato Mercosul para teste, de forma que caso tenha mudado apenas o formato, seja aceito o mesmo veiculo.
+            if (!placa.equals(placaAtual != null ? placaAtual : "") && !ConsultaPorPlaca.adaptaPlacaParaFormatoMercosul(placa).equals(placaAtual != null ? placaAtual : "")) {
+                validarPlaca(placa, clienteId, force);
+            }
+
             db.update("call AtualizarVeiculo(?, ?, ?, ?, ?, ?, ?, ?)", id, veiculo.get("montadora"), veiculo.get("modelo"), veiculo.get("ano"), placa, veiculo.get("cor"), veiculo.get("combustivel"), veiculo.getOrDefault("tipo", "C"));
             Map<String, Object> response = new HashMap<>(veiculo); response.put("cod_veiculo", id); response.put("placa", placa);
             return ResponseEntity.ok(response);
-        } catch (Exception e) { return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Collections.singletonMap("message", "Erro ao atualizar veículo: " + e.getMessage())); }
+        } catch (PlacaConflictException e) {
+            // Relança para ser tratado pelo GlobalExceptionHandler (409 com body rico)
+            throw e;
+        } catch (Exception e) {
+            if (e.getMessage() != null && e.getMessage().contains("Já existe um veículo"))
+                return ResponseEntity.badRequest().body(Collections.singletonMap("message", e.getMessage()));
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Collections.singletonMap("message", "Erro ao atualizar veículo: " + e.getMessage()));
+        }
+    }
+
+    // ======================== MÉTODOS PRIVADOS ========================
+
+    /**
+     * Valida a placa no contexto de um cliente específico.
+     * Cobre equivalência Mercosul (ex: HIK9536 == HIK9F36).
+     *
+     * - Lança IllegalArgumentException (400) se a placa já está cadastrada para este cliente.
+     * - Lança PlacaConflictException (409) se está cadastrada para outros clientes e force=false.
+     * - Retorna normalmente se a placa está livre ou se force=true (conflito ignorado pelo usuário).
+     *
+     * @param placa     Placa já limpa e em maiúsculas (somente alfanuméricos)
+     * @param clienteId ID do cliente que está tentando cadastrar
+     * @param force     Se true, ignora conflito com outros clientes (usuário confirmou)
+     */
+    private void validarPlaca(String placa, int clienteId, boolean force) {
+        // Obtém a placa equivalente no outro formato (Mercosul <-> antigo)
+        String placaAlternativa = ConsultaPorPlaca.adaptaPlacaParaFormatoMercosul(placa);
+
+        // Monta as condições de comparação considerando ambos os formatos
+        String condicaoPlaca = placaAlternativa != null
+            ? "(REPLACE(REPLACE(v.placa, '-', ''), ' ', '') = ? OR REPLACE(REPLACE(v.placa, '-', ''), ' ', '') = ?)"
+            : "REPLACE(REPLACE(v.placa, '-', ''), ' ', '') = ?";
+
+        // 1. Erro definitivo: mesma placa (ou equivalente Mercosul) para o mesmo cliente
+        String sqlMesmoCliente = "SELECT COUNT(*) FROM tb_veiculo v WHERE " + condicaoPlaca + " AND v.fk_cod_cliente = ?";
+        Integer countMesmoCliente;
+        if (placaAlternativa != null) {
+            countMesmoCliente = db.queryForObject(sqlMesmoCliente, Integer.class, placa, placaAlternativa, clienteId);
+        } else {
+            countMesmoCliente = db.queryForObject(sqlMesmoCliente, Integer.class, placa, clienteId);
+        }
+        if (countMesmoCliente != null && countMesmoCliente > 0) {
+            throw new IllegalArgumentException(
+                "Já existe um veículo cadastrado com essa placa (" + placa + ") para o cliente atual. Veículo não salvo."
+            );
+        }
+
+        // 2. Conflito com outros clientes (aviso — ignorável com force=true)
+        if (!force) {
+            String sqlOutrosClientes = "SELECT v.fk_cod_cliente as cod_cliente, c.nome_cliente " +
+                "FROM tb_veiculo v " +
+                "JOIN tb_cliente c ON v.fk_cod_cliente = c.cod_cliente " +
+                "WHERE " + condicaoPlaca + " AND v.fk_cod_cliente != ?";
+
+            List<Map<String, Object>> outrosProprietarios;
+            if (placaAlternativa != null) {
+                outrosProprietarios = db.queryForList(sqlOutrosClientes, placa, placaAlternativa, clienteId);
+            } else {
+                outrosProprietarios = db.queryForList(sqlOutrosClientes, placa, clienteId);
+            }
+
+            if (!outrosProprietarios.isEmpty()) {
+                String msg = outrosProprietarios.size() == 1
+                    ? "Já existe um veículo cadastrado com essa placa para outro cliente (Nome: " +
+                      outrosProprietarios.get(0).get("nome_cliente") + "). Deseja prosseguir?"
+                    : "Já existem veículos cadastrados com essa placa para outros " +
+                      outrosProprietarios.size() + " clientes. Deseja prosseguir?";
+                throw new PlacaConflictException(msg, outrosProprietarios);
+            }
+        }
     }
     
     @DeleteMapping("/veiculos/{id}")
@@ -438,12 +339,87 @@ public class ApiController {
         }
     }
 
+    /**
+     * Gera um PDF com as ordens de serviço de um veículo (código do veículo = {id}).
+     * 
+     * @param id ID do veículo
+     * @param status Permite filtrar por status (default = 0 -> lista todos os status)
+     *                  Status válidos: 0 -> Todos, 1 -> Orçamento, 2 -> Ordem de Serviço Aberta, 3 -> Serviço em Andamento, 4 -> Finalizado, 5-> Cancelado
+     * @param dataInicio Permite filtrar por data de início (default = data atual)
+     * @param dataFim Permite filtrar por data de fim (default = data atual)
+     * @return Arquivo PDF com as ordens de serviço do veículo
+     * 
+     * Exemplo de uso:
+     *      GET /api/veiculos/3961/os/pdf?status=1,2,3&dataInicio=2015-01-01&dataFim=2022-01-01
+     *      (pega os orçamentos, ordens de serviço abertas e serviço em andamento de 2015 a 2022)
+     */
     @GetMapping("/veiculos/{id}/os/pdf")
-    public ResponseEntity<byte[]> getVeiculoOsPdf(@PathVariable int id) {
+    public ResponseEntity<byte[]> getVeiculoOsPdf(
+        @PathVariable int id,
+        @RequestParam(value = "status", required = false, defaultValue = "4") List<Integer> status, // 0=Todos, 1=Orçamento, 2=OS Aberta, 3=Serviço em Andamento, 4=Finalizado, 5=Cancelado
+        @RequestParam(value = "dataInicio", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dataInicio,
+        @RequestParam(value = "dataFim", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dataFim) {
         try {
-            Map<String, Object> dados = db.queryForMap("SELECT v.*, c.nome_cliente, c.celular, c.telefone, c.cpf_cnpj FROM tb_veiculo v JOIN tb_cliente c ON v.fk_cod_cliente = c.cod_cliente WHERE v.cod_veiculo = ?", id);
-            List<Map<String, Object>> ordens = db.queryForList("SELECT os.cod_OS, os.data_OS, os.quilometragem, os.descricao, os.status_servico, os.tipo_desconto, os.desconto, os.valor_pago FROM tb_ordem_servico os WHERE os.fk_cod_veiculo = ? AND os.status_servico = ? ORDER BY os.data_OS DESC, os.cod_OS DESC", id, 4);
-            List<Map<String, Object>> itens = db.queryForList("SELECT i.*, os.cod_OS FROM tb_item_os i JOIN tb_ordem_servico os ON i.fk_cod_OS = os.cod_OS WHERE os.fk_cod_veiculo = ? AND os.status_servico = ? ORDER BY os.data_OS DESC, os.cod_OS DESC, i.tipo, i.cod_item", id, 4);
+            // 1. Busca dados do veículo e cliente
+            Map<String, Object> dados = db.queryForMap(
+                "SELECT v.*, c.nome_cliente, c.celular, c.telefone, c.cpf_cnpj " +
+                "FROM tb_veiculo v JOIN tb_cliente c ON v.fk_cod_cliente = c.cod_cliente " +
+                "WHERE v.cod_veiculo = ?", id
+            );
+
+            // 2. Construção dinâmica das queries de ordens e itens
+            StringBuilder sqlOrdens = new StringBuilder(
+                "SELECT os.cod_OS, os.data_OS, os.quilometragem, os.descricao, os.status_servico, os.tipo_desconto, os.desconto, os.valor_pago " +
+                "FROM tb_ordem_servico os " +
+                "WHERE os.fk_cod_veiculo = ?"
+            );
+
+            StringBuilder sqlItens = new StringBuilder(
+                "SELECT i.*, os.cod_OS FROM tb_item_os i " +
+                "JOIN tb_ordem_servico os ON i.fk_cod_OS = os.cod_OS " +
+                "WHERE os.fk_cod_veiculo = ?"
+            );
+
+            // Lista para armazenar os parâmetros que serão injetados no SQL
+            List<Object> params = new ArrayList<>();
+            params.add(id);
+
+            // Filtro de Status (Se contiver 0 ou estiver vazia, busca todos)
+            if (status != null && !status.isEmpty() && !status.contains(0)) {
+                String placeholders = String.join(",", Collections.nCopies(status.size(), "?"));
+                
+                sqlOrdens.append(" AND os.status_servico IN (").append(placeholders).append(")");
+                sqlItens.append(" AND os.status_servico IN (").append(placeholders).append(")");
+                
+                // Adiciona os valores dos status duas vezes (uma para a query de ordens, outra para itens)
+                List<Object> statusParams = new ArrayList<>(status);
+                params.addAll(statusParams); 
+            }
+
+            // Filtro de Data Inicial
+            if (dataInicio != null) {
+                sqlOrdens.append(" AND os.data_OS >= ?");
+                sqlItens.append(" AND os.data_OS >= ?");
+                params.add(dataInicio);
+            }
+
+            // Filtro de Data Final
+            if (dataFim != null) {
+                sqlOrdens.append(" AND os.data_OS <= ?");
+                sqlItens.append(" AND os.data_OS <= ?");
+                params.add(dataFim);
+            }
+
+            // Ordenação final das queries
+            sqlOrdens.append(" ORDER BY os.data_OS DESC, os.cod_OS DESC");
+            sqlItens.append(" ORDER BY os.data_OS DESC, os.cod_OS DESC, i.tipo, i.cod_item");
+
+            // Separa os parâmetros específicos de cada query baseando-se na ordem de construção
+            Object[] paramsArray = params.toArray();
+
+            // Executa as buscas no banco de dados com os filtros aplicados
+            List<Map<String, Object>> ordens = db.queryForList(sqlOrdens.toString(), paramsArray);
+            List<Map<String, Object>> itens = db.queryForList(sqlItens.toString(), paramsArray);
 
             if (ordens.isEmpty()) {
                 String mensagem = String.format("Nenhuma ordem de serviço concluída encontrada para o veículo ID %d", id);
@@ -453,14 +429,13 @@ public class ApiController {
                   .body(mensagem.getBytes(StandardCharsets.UTF_8));
             }
 
-            // Agrupar itens por cod_OS dentro de cada ordem
+            // 3. Agrupar itens por cod_OS dentro de cada ordem
             for (Map<String, Object> ordem : ordens) {
                 List<Map<String, Object>> itensDaOrdem = new ArrayList<>();
                 int codOs = Integer.parseInt(ordem.get("cod_OS").toString());
 
                 for (Map<String, Object> item : itens) {
                     int codOsItem = Integer.parseInt(item.get("cod_OS").toString());
-
                     if (codOsItem == codOs) {
                         itensDaOrdem.add(item);
                     }
@@ -472,28 +447,17 @@ public class ApiController {
             dadosRelatorio.put("dados", dados);
             dadosRelatorio.put("ordens", ordens);
 
-
-            // dadosRelatorio.put("placa", dados.get("placa"));
-            // dadosRelatorio.put("montadora", dados.get("montadora"));
-            // dadosRelatorio.put("modelo", dados.get("modelo"));
-            // dadosRelatorio.put("cor", dados.get("cor"));
-            // dadosRelatorio.put("ano", dados.get("ano").toString().substring(0, 4));
-            // dadosRelatorio.put("combustivel", dados.get("combustivel"));
-
-            // dadosRelatorio.put("nome_cliente", dados.get("nome_cliente"));
-            // dadosRelatorio.put("celular", dados.get("celular"));
-            // dadosRelatorio.put("telefone", dados.get("telefone"));
-            // dadosRelatorio.put("cpf_cnpj", dados.get("cpf_cnpj"));
-
+            // 4. Geração e retorno do PDF
             byte[] pdfBytes = pdfRelVeiculoService.gerarRelatorioOsPorVeiculo(dadosRelatorio);
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_PDF);
 
-            // Gerar nome do arquivo com base na placa e data atual
             String placa = dados.get("placa") != null ? dados.get("placa").toString().replaceAll("\\W", "").toUpperCase() : "veiculo";
             headers.setContentDispositionFormData("attachment", "relatorio_os_" + placa + "_" + LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd")) + ".pdf");
+            
             return ResponseEntity.ok().headers(headers).body(pdfBytes);
+
         } catch (EmptyResultDataAccessException e) {
             String mensagem = String.format("Veículo não encontrado para gerar PDF: ", e.getMessage());
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(mensagem.getBytes(StandardCharsets.UTF_8));

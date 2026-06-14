@@ -1,25 +1,23 @@
 package com.carbulab.domain;
 
+import jakarta.persistence.MappedSuperclass;
+import jakarta.persistence.Column;
+import lombok.Getter;
+import lombok.Setter;
+
+@MappedSuperclass
+@Getter
+@Setter
 public abstract class Pessoa {
 
+    @Column(name = "nome_cliente")
     private String nome;
+    @Column(name = "email")
     private String email;
 
     public Pessoa(String nome, String email) {
         this.setNome(nome);
         this.setEmail(email);
-    }
-
-    public String getNome() {
-        return nome;
-    }
-
-    public void setNome(String nome) { // Nomes podem ter parênteses, por exemplo (no backup trazido da oficina tem)
-        this.nome = nome;
-    }
-
-    public String getEmail() {
-        return email;
     }
 
     public void setEmail(String email) { // Não obrigatório

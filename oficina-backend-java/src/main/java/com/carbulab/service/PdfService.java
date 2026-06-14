@@ -9,7 +9,6 @@ import org.springframework.stereotype.Service;
 
 import com.itextpdf.text.*;
 import com.itextpdf.text.pdf.*;
-import com.itextpdf.text.pdf.draw.LineSeparator;
 
 @Service
 public class PdfService {
@@ -85,7 +84,6 @@ public class PdfService {
         documento.add(paragrafoTitulo);
 
         documento.add(new Paragraph(" "));
-        documento.add(new LineSeparator());
     }
 
     protected static void dadosClienteVeiculo(Document documento, Map<String, Object> dados) throws DocumentException {

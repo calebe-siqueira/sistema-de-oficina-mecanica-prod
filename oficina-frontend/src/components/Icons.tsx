@@ -91,6 +91,14 @@ export { LuChevronLeft };
 import { LuChevronRight } from "react-icons/lu";
 export { LuChevronRight };
 
+// Seta para a esquerda (Primeira)
+import { LuChevronFirst } from "react-icons/lu";
+export { LuChevronFirst };
+
+// Seta para a direita (Última)
+import { LuChevronLast } from "react-icons/lu";
+export { LuChevronLast };
+
 // Impressora
 import { LuPrinter } from "react-icons/lu";
 export { LuPrinter };
