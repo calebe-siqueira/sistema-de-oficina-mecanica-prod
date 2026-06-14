@@ -1,17 +1,15 @@
 package com.carbulab.domain;
 
-import java.util.ArrayList;
+import jakarta.persistence.Table;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
 
-// Removemos as importações de banco de dados e JOptionPane
-// import conexaobancodedados.ManipulacaoDeDados; (REMOVIDO)
-// import javax.swing.JOptionPane; (REMOVIDO)
-
+@Table(name = "tb_usuario")
+@Entity(name = "Usuario")
 public class Usuario extends Pessoa {
     
-    // Lista estática pode ser mantida para cache simples, mas em Web o ideal é não usar estático para estado
-    // public static ArrayList<Usuario> admins = new ArrayList<>(); 
-    
-    private int codigo;
+    @Id
+    private long codigo;
     private String login;
     private String senha; // Em produção, isso armazena o Hash BCrypt
     private String funcao;
@@ -34,8 +32,7 @@ public class Usuario extends Pessoa {
     }
 
     // --- Getters e Setters ---
-
-    public int getCodigo() {
+    public long getCodigo() {
         return codigo;
     }
 
@@ -66,14 +63,5 @@ public class Usuario extends Pessoa {
     public void setFuncao(String funcao) {
         this.funcao = funcao;
     }
-    
-    // --- OBSERVAÇÃO IMPORTANTE ---
-    // Todos os métodos abaixo foram REMOVIDOS desta classe:
-    // - addCliente, edtCliente, delCliente
-    // - addCarro, delCarro
-    // - addOs, delOs, addPeca, etc.
-    //
-    // MOTIVO: Em uma arquitetura Web/Spring, uma instância de 'Usuario' não deve
-    // ter a responsabilidade de salvar outros objetos no banco. 
-    // Essa responsabilidade agora é dos 'Controllers' e 'Services'.
+
 }

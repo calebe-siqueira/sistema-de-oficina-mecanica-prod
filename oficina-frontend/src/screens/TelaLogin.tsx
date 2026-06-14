@@ -67,9 +67,9 @@ export const TelaLogin: React.FC = () => {
               title={mostrarSenha ? 'Ocultar senha' : 'Mostrar senha'}
               aria-label={mostrarSenha ? 'Ocultar senha' : 'Mostrar senha'}
               className="absolute inset-y-11 right-0 pr-3 flex items-center text-sm leading-5"
-              onMouseDown={() => setMostrarSenha((prev) => !prev)}
-              onMouseUp={() => setMostrarSenha((prev) => !prev)}
-              // onClick={() => setMostrarSenha((prev) => !prev)}
+              // onMouseDown={() => setMostrarSenha((prev) => !prev)}
+              // onMouseUp={() => setMostrarSenha((prev) => !prev)}
+              onClick={() => setMostrarSenha((prev) => !prev)}
             >
               {mostrarSenha ? (
                 <LuEye className="h-5 w-5 text-gray-500" />

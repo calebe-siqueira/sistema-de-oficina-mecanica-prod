@@ -10,8 +10,8 @@ public class EnvioDeEmail {
     
     public static int enviarEmail(String emailDestinatario) {
         
-        String emailRemetente = "samucasiqueira11@gmail.com";
-        String senhaRemetente = "znmt dowh bmgj yvty";
+        String emailRemetente = ""; // Endereço de e-mail
+        String senhaRemetente = ""; // Senha de App no formato "aaaa aaaa aaaa aaaa"
         
         SimpleEmail email = new SimpleEmail();
         email.setHostName("smtp.gmail.com");

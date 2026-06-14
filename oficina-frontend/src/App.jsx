@@ -5,6 +5,7 @@ import Button from './components/Button';
 import Input from './components/Input';
 import Select from './components/Select';
 import Pagination from './components/Pagination';
+import { SystemToastContainer, toastify } from './components/SystemMessages';
 
 import { AuthContext } from './context/AuthContext';
 import { NavigationContext } from './context/NavigationContext';
@@ -34,7 +35,18 @@ import { maskPlaca } from './utils/maskPlaca';
 export const formatSafeDate = (val) => {
   if (!val) return '';
   try {
-    if (typeof val === 'string') return val.includes('T') ? val.split('T')[0] : val;
+    if (typeof val === 'string') {
+      // 1. Trata formato ISO (ex: 1995-05-26T00:00:00)
+      if (val.includes('T')) return val.split('T')[0];
+      
+      // 2. Trata formato brasileiro (ex: 26/05/1995) convertendo para yyyy-MM-dd
+      if (val.includes('/')) {
+        const [day, month, year] = val.split('/');
+        return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+      }
+
+      return val;
+    }
     if (typeof val === 'number') return new Date(val).toISOString().split('T')[0];
     if (Array.isArray(val)) return `${val[0]}-${String(val[1] || '').padStart(2, '0')}-${String(val[2] || '').padStart(2, '0')}`;
     if (val instanceof Date) return val.toISOString().split('T')[0];
@@ -56,7 +68,7 @@ const maskCep = (v) => {
 
 const maskPhone = (v) => {
   if (!v || String(v) === 'null' || String(v) === 'undefined') return '';
-  
+
   let val = String(v).replace(/\D/g, '');
   if (val.length === 0) return '';
 
@@ -64,10 +76,10 @@ const maskPhone = (v) => {
   if (val.length <= 9) {
     // Até 4 dígitos (Fixo ou início de celular): 9999
     if (val.length <= 4) return val;
-    
+
     // Até 8 dígitos (Telefone Fixo padrão): 3333-4444
     if (val.length <= 8) return `${val.slice(0, 4)}-${val.slice(4)}`;
-    
+
     // 9 dígitos (Celular padrão): 99999-4444
     return `${val.slice(0, 5)}-${val.slice(5, 9)}`;
   }
@@ -125,6 +137,16 @@ const dateInRange = (value, min, max) => {
 };
 
 // --- Hooks ---
+// Erro de API com status HTTP e dados estruturados do corpo da resposta
+class ApiError extends Error {
+  constructor(message, status, data) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.data = data;
+  }
+}
+
 export const useApi = () => {
   const { token, logout } = useContext(AuthContext);
   const request = useCallback(async (endpoint, method = 'GET', body = null) => {
@@ -134,10 +156,10 @@ export const useApi = () => {
       const options = { method, headers };
       if (body) options.body = JSON.stringify(body);
       const response = await fetch(`/api${endpoint}`, options);
-      if (response.status === 401) { logout(); throw new Error('Sessão expirada ou acesso negado.'); }
+      if (response.status === 401) { logout(); throw new ApiError('Sessão expirada ou acesso negado.', 401, null); }
       if (!response.ok) {
         const errData = await response.json().catch(() => ({ message: `Erro ${response.status}` }));
-        throw new Error(errData.message || `Erro ${response.status}`);
+        throw new ApiError(errData.message || `Erro ${response.status}`, response.status, errData);
       }
       if (response.status === 204) return null;
       return response.json();
@@ -294,6 +316,7 @@ const ReportsView = () => {
   const [error, setError] = useState('');
 
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchInput, setSearchInput] = useState('');
   const [searchType, setSearchType] = useState('placa');
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -328,15 +351,18 @@ const ReportsView = () => {
     setReportLoading(true);
     setError('');
     try {
+      toastify.loadingMessage("Gerando PDF...", vehicleId, 'info')
       const response = await fetch(`/api/veiculos/${vehicleId}/os/pdf`, {
         method: 'GET',
         headers: { Authorization: token ? `Bearer ${token}` : '' },
       });
       if (!response.ok) {
+        toastify.loadingMessage("Erro ao gerar PDF", vehicleId, 'error')
         const errText = await response.text();
         const message = errText || `Erro ${response.status}`;
         throw new Error(`Falha ao gerar PDF: ${message}`);
       }
+      toastify.loadingMessage("PDF gerado com sucesso!", vehicleId, 'success')
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       window.open(url, '_blank');
@@ -347,9 +373,7 @@ const ReportsView = () => {
     }
   };
 
-  const handleSearch = (e) => {
-    e.preventDefault();
-    setCurrentPage(1);
+  useEffect(() => {
     if (!searchTerm) {
       setFilteredVehicles(allVehicles);
       return;
@@ -370,6 +394,10 @@ const ReportsView = () => {
       }
     });
     setFilteredVehicles(res);
+  }, [searchTerm, searchType, allVehicles]);
+
+  const handleSearch = (e) => {
+    e.preventDefault();
   };
 
   const handleItemsPerPageChange = (e) => {
@@ -390,7 +418,15 @@ const ReportsView = () => {
         <div className="mb-6 bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex flex-col xl:flex-row gap-4 items-start xl:items-center justify-between">
           <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-3 w-full xl:w-auto flex-grow">
             {/* Filtros de busca de relatório de veículo */}
-            <Select value={searchType} onChange={(e) => setSearchType(e.target.value)} className="w-full sm:w-48 shrink-0">
+            <Select
+              value={searchType}
+              onChange={(e) => {
+                setSearchType(e.target.value);
+                setSearchTerm('');
+                setSearchInput('');
+              }}
+              className="w-full sm:w-48 shrink-0"
+            >
               <optgroup label="Dados do veículo">
                 <option value="placa">Placa</option>
                 <option value="montadora">Montadora</option>
@@ -404,7 +440,20 @@ const ReportsView = () => {
                 <option value="telefone">Celular/Telefone</option>
               </optgroup>
             </Select>
-            <Input type="text" placeholder="Buscar..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full sm:w-auto flex-grow" />
+            <Input
+              type="text"
+              placeholder="Buscar..."
+              value={searchInput}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSearchInput(val);
+                if (val.length >= 3 || val.length === 0) {
+                  setSearchTerm(val);
+                  setCurrentPage(1);
+                }
+              }}
+              className="w-full sm:w-auto flex-grow"
+            />
             <Button type="submit" variant="primary" className="shrink-0"><LuSearch className="mr-2 h-5 w-5" /> Buscar</Button>
           </form>
           <div className="flex items-center">
@@ -562,8 +611,9 @@ const ClientList = ({ params }) => {
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [searchType, setSearchType] = useState('nome');
+  const [searchType, setSearchType] = useState(params.searchType || 'nome');
+  const [searchTerm, setSearchTerm] = useState(params.searchTerm || '');
+  const [searchInput, setSearchInput] = useState(params.searchTerm || '');
   const [itemsPerPage, setItemsPerPage] = useState(25);
   const [visibleCount, setVisibleCount] = useState(25);
 
@@ -582,10 +632,15 @@ const ClientList = ({ params }) => {
     finally { setLoading(false); }
   }, [api]);
 
-  useEffect(() => { fetchClients(searchTerm, searchType); }, [fetchClients]);
+  useEffect(() => { fetchClients(searchTerm, searchType); }, [fetchClients, searchTerm, searchType]);
   useEffect(() => { if (params?.action === 'new') navigate('clientForm', { clientId: 'new' }); }, [params, navigate]);
 
-  const handleSearch = (e) => { e.preventDefault(); setVisibleCount(itemsPerPage); fetchClients(searchTerm, searchType); };
+  const handleSearch = (e) => {
+    e.preventDefault();
+    setSearchTerm(searchInput);
+    setVisibleCount(itemsPerPage);
+    fetchClients(searchTerm, searchType);
+  };
 
   const handleItemsPerPageChange = (e) => {
     const val = Number(e.target.value);
@@ -599,12 +654,21 @@ const ClientList = ({ params }) => {
     <Card>
       <CardHeader className='h-16' actions={!selectClientForOS && (<Button onClick={() => navigate('clientForm', { clientId: 'new' })}><LuPlus className="mr-2 h-5 w-5" /> Novo cliente</Button>)}>
         {selectClientForOS ? 'Selecione um cliente para a OS' : 'Clientes'}
+        {/* {selectClientForVehicle ? 'Selecione um cliente para o veículo' : 'Clientes'} */}
       </CardHeader>
       <CardContent>
         <div className="mb-6 bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex flex-col xl:flex-row gap-4 items-start xl:items-center justify-between">
           <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-3 w-full xl:w-auto flex-grow">
             {/* Filtros de busca de cliente */}
-            <Select value={searchType} onChange={(e) => setSearchType(e.target.value)} className="w-full sm:w-48 shrink-0">
+            <Select
+              value={searchType}
+              onChange={(e) => {
+                setSearchType(e.target.value)
+                setSearchTerm('')
+                setSearchInput('')
+              }}
+              className="w-full sm:w-48 shrink-0"
+            >
               <optgroup label="Dados do cliente">
                 <option value="nome">Nome</option>
                 <option value="cpf_cnpj">CPF/CNPJ</option>
@@ -614,7 +678,20 @@ const ClientList = ({ params }) => {
                 <option value="placa">Placa</option>
               </optgroup>
             </Select>
-            <Input type="text" placeholder="Buscar..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full sm:w-auto flex-grow" />
+            <Input
+              type="text"
+              placeholder="Buscar..."
+              value={searchInput}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSearchInput(val); // Seta o valor digitado no input
+                if (val.length >= 3 || val.length === 0) {
+                  setSearchTerm(val); // Seta o valor da busca quando tiver pelo menos 3 caracteres
+                  // setCurrentPage(1);
+                }
+              }}
+              className="w-full sm:w-auto flex-grow"
+            />
             <Button type="submit" variant="primary" className="shrink-0"><LuSearch className="mr-2 h-5 w-5" /> Buscar</Button>
           </form>
 
@@ -739,26 +816,25 @@ const ClientForm = ({ params }) => {
       const fetchClientData = async () => {
         setLoading(true); setError('');
         try {
-          const clientData = await api(`/clientes/${clientId}`);
-          if (isMounted && clientData) {
-            // Clonagem de segurança para não mutar acidentalmente objetos fora do estado
-            const c = { ...(clientData.cliente || initialClientState) };
-            c.data_nascimento = formatSafeDate(c.data_nascimento);
-            c.cpf_cnpj = maskCpfCnpj(c.cpf_cnpj);
-            c.celular = maskPhone(c.celular);
-            c.telefone = maskPhone(c.telefone);
-            setClient(c);
-
-            const addr = { ...(clientData.endereco || initialAddressState) };
-            addr.cep = maskCep(addr.cep);
-            setAddress(addr);
-
-            setVehicles(Array.isArray(clientData.veiculos) ? clientData.veiculos : []);
-          }
-        } catch (err) {
-          if (isMounted) setError(`Erro ao carregar: ${err.message}`);
-        } finally {
-          if (isMounted) setLoading(false);
+            const clientData = await api(`/clientes/${clientId}`);
+            if (isMounted && clientData) {
+              // Clonagem de segurança para não mutar acidentalmente objetos fora do estado
+              const c = { ...(clientData.cliente || initialClientState) };
+              clientData.data_nascimento = formatSafeDate(clientData.data_nascimento);
+              clientData.cpf_cnpj = maskCpfCnpj(clientData.cpf_cnpj);
+              clientData.celular = maskPhone(clientData.celular);
+              clientData.telefone = maskPhone(clientData.telefone);
+              setClient(clientData);
+                const addr = { ...(clientData.endereco || initialAddressState) };
+                addr.cep = maskCep(addr.cep);
+                setAddress(addr);
+                
+                setVehicles(Array.isArray(clientData.veiculos) ? clientData.veiculos : []);
+            }
+        } catch (err) { 
+            if (isMounted) setError(`Erro ao carregar: ${err.message}`); 
+        } finally { 
+            if (isMounted) setLoading(false); 
         }
       };
       fetchClientData();
@@ -843,7 +919,7 @@ const ClientForm = ({ params }) => {
   );
   const isClientFormValid = client.nome_cliente.trim() !== '' && clientHasValidPhone && clientPhonesValid && isValidBirthDate && isAddressValid && isCpfCnpjValid;
 
-  const handleCepBlur = async (e) => {
+  const handleCepSearch = async (e) => {
     const cep = String(e.target.value).replace(/\D/g, '');
     if (cep.length === 8) {
       try {
@@ -852,8 +928,12 @@ const ClientForm = ({ params }) => {
         if (!data.erro) {
           setAddress(prev => ({ ...prev, cep: maskCep(data.cep), logradouro: data.logradouro, bairro: data.bairro, cidade: data.localidade, uf: data.uf, complemento: data.complemento || '' }));
           document.getElementById('numero')?.focus();
+        } else {
+          toastify.warningMessage("Não foi possível encontrar um endereço para o CEP informado")
         }
-      } catch (err) {}
+      } catch (err) {
+        toastify.warningMessage("Não foi possível buscar o endereço pelo CEP")
+      }
     }
   };
 
@@ -863,9 +943,14 @@ const ClientForm = ({ params }) => {
 
     setSaving(true);
     try {
-      const payload = {
-        cliente: { ...client, data_nascimento: formatSafeDate(client.data_nascimento) || null, cpf_cnpj: client.cpf_cnpj ? String(client.cpf_cnpj).replace(/\D/g, '') : null },
-        endereco: { ...address, cep: address.cep ? String(address.cep).replace(/\D/g, '') : null }
+      const payload = { 
+        ...client,
+        data_nascimento: formatSafeDate(client.data_nascimento) || null,
+        cpf_cnpj: client.cpf_cnpj ? String(client.cpf_cnpj).replace(/\D/g, '') : null, 
+        endereco: { ...address,
+          cep: address.cep ? String(address.cep).replace(/\D/g, '') : null,
+          numero: address.numero && address.numero !== "" ? parseInt(address.numero) : null
+        }
       };
       if (!payload.endereco.cep) payload.endereco = {};
 
@@ -914,7 +999,7 @@ const ClientForm = ({ params }) => {
         <Card>
           <CardHeader>{isNewClient ? 'Novo cliente' : `Editando: ${client?.nome_cliente || ''}`}</CardHeader>
           <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <Input label="Nome Completo" id="nome_cliente" name="nome_cliente" value={client?.nome_cliente || ''} onChange={handleClientChange} required />
+            <Input label="Nome completo" id="nome_cliente" name="nome_cliente" value={client?.nome_cliente || ''} onChange={handleClientChange} required />
             <div className="w-full">
               <Input label="CPF/CNPJ" id="cpf_cnpj" name="cpf_cnpj" value={client?.cpf_cnpj || ''} onChange={handleClientChange} onBlur={validateCpfCnpj} invalid={cpfCnpjInvalid && client.cpf_cnpj} />
             </div>
@@ -933,7 +1018,7 @@ const ClientForm = ({ params }) => {
         <Card>
           <CardHeader>Endereço</CardHeader>
           <CardContent className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            <Input label="CEP" id="cep" name="cep" value={address?.cep || ''} onChange={handleAddressChange} onBlur={handleCepBlur} placeholder="00000-000" required={!!address.cep} invalid={address?.cep && !isCepComplete(address.cep)} />
+            <Input label="CEP" id="cep" name="cep" value={address?.cep || ''} onChange={(e) => { handleAddressChange(e); handleCepSearch(e); }} placeholder="00000-000" required={!!address.cep} invalid={address?.cep && !isCepComplete(address.cep)} />
             <Input label="Logradouro" id="logradouro" name="logradouro" value={address?.logradouro || ''} onChange={handleAddressChange} className="md:col-span-2 lg:col-span-3" required={!!address.cep} />
             <Input label="Número" id="numero" name="numero" type="number" min="0" step="1" value={address?.numero ?? ''} onChange={handleAddressChange} required={!!address.cep} invalid={address?.numero !== '' && parseInt(address.numero, 10) < 0} />
             <Input label="Complemento" id="complemento" name="complemento" value={address?.complemento || ''} onChange={handleAddressChange} />
@@ -962,10 +1047,24 @@ const ClientForm = ({ params }) => {
                     view="clientForm"
                     osSearchType={osSearchType}
                     osSearchTerm={osSearchTerm}
-                    onVehicleClick={(v) => { setOsSearchType('cod_veiculo'); setOsSearchTerm(String(v.cod_veiculo)); setOsSearchInput(String(v.cod_veiculo)); }}
-                    onCreateOs={(v) => navigate('serviceOrderForm', { osId: 'new', vehicleId: v.cod_veiculo, clientId: clientId })}
-                    onEditVehicle={(v) => { setSelectedVehicle(v); setVehicleModalOpen(true); }}
+                    onVehicleClick={(v) => {
+                      setOsSearchType('cod_veiculo');
+                      setOsSearchTerm(String(v.cod_veiculo));
+                      setOsSearchInput(String(v.cod_veiculo));
+                    }}
+                    onCreateOs={(v) => {
+                      navigate('serviceOrderForm', {
+                        osId: 'new',
+                        vehicleId: v.cod_veiculo,
+                        clientId: clientId
+                      })
+                    }}
+                    onEditVehicle={(v) => {
+                      setSelectedVehicle(v);
+                      setVehicleModalOpen(true);
+                    }}
                     onDeleteVehicle={async (v) => {
+                      //                  Excluir veículo ${v.placa}? + (typeof v.quantidade_OS === 'undefined' ? \nAtenção, isso também irá excluir as ${v.quantidade_OS} ordens de serviço associadas a ele. : '')
                       if (window.confirm(`Excluir veículo ${maskPlaca(v.placa)}?\nAtenção, isso também irá excluir as ${v.quantidade_OS || 0} ordens de serviço associadas a ele.`)) {
                         try { await api(`/veiculos/${v.cod_veiculo}`, 'DELETE'); setVehicles(prev => prev.filter(x => x.cod_veiculo !== v.cod_veiculo)); }
                         catch (err) { alert(`Erro: ${err.message}`); }
@@ -981,15 +1080,14 @@ const ClientForm = ({ params }) => {
                 <div className="flex flex-col xl:flex-row gap-4 w-full justify-between items-start xl:items-center mb-6">
                   <div className="flex flex-col sm:flex-row gap-3 w-full xl:w-auto flex-grow">
                     {/* Filtros de busca de OS dentro do cliente */}
-                    <Select 
-                      value={osSearchType} 
-                      onChange={(e) => { 
+                    <Select
+                      value={osSearchType}
+                      onChange={(e) => {
                         setOsSearchType(e.target.value)
                         setOsSearchTerm("");
                         setOsSearchInput("");
                         setOsStartDate("");
                         setOsEndDate("");
-                        setOsFilterStatus("Todas");
                       }}
                       className="w-full sm:w-48 shrink-0"
                     >
@@ -1008,47 +1106,57 @@ const ClientForm = ({ params }) => {
                       </optgroup>
                     </Select>
 
-                    {osSearchType === 'intervalo_data' ? (
-                      <div className="flex items-center gap-2 w-full sm:w-auto">
-                        <Input type="date" value={osStartDate} onChange={e => setOsStartDate(e.target.value)} required />
-                        <span className="text-gray-500 text-sm font-medium px-1">até</span>
-                        <Input type="date" value={osEndDate} onChange={e => setOsEndDate(e.target.value)} required />
-                      </div>
-                    ) : osSearchType === 'data' ? (
-                      <Input type="date" value={osSearchInput} onChange={e => { setOsSearchInput(e.target.value); setOsSearchTerm(e.target.value); }} className="w-full sm:w-auto flex-grow" required />
-                    ) : (
-                      <Input
-                      type="text"
-                      placeholder="Buscar..."
-                      value={osSearchInput}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setOsSearchInput(val);
-                        if (val.length >= 3 || val.length === 0) {
-                          setOsSearchTerm(val);
-                        }
-                      }}
-                      className="w-full sm:w-auto flex-grow"
-                      />
-                    )}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      title="Limpar filtros"
-                      className="shrink-0" // impede que encolha na linha flex
-                      onClick={() => {
-                        setOsSearchTerm("");
-                        setOsSearchInput("");
-                        setOsStartDate("");
-                        setOsEndDate("");
-                        setOsFilterStatus("Todas");
-                        setOsSearchType("cod_OS"); // resetar tipo de busca
-                      }}
-                    >
-                      <LuEraser className="h-5 w-5" />
-                    </Button>
+                    <div className="flex flex-row gap-3 w-full sm:w-auto flex-grow">
+                      {osSearchType === 'intervalo_data' ? (
+                        <div className="flex items-center gap-2 w-full sm:w-auto">
+                          <Input type="date" value={osStartDate} onChange={e => setOsStartDate(e.target.value)} required />
+                          <span className="text-gray-500 text-sm font-medium px-1">até</span>
+                          <Input type="date" value={osEndDate} onChange={e => setOsEndDate(e.target.value)} required />
+                        </div>
+                      ) : osSearchType === 'data' ? (
+                        <Input type="date" value={osSearchInput} onChange={e => { setOsSearchInput(e.target.value); setOsSearchTerm(e.target.value); }} className="w-full sm:w-auto flex-grow" required />
+                      ) : (
+                        <Input
+                          type="text"
+                          placeholder="Buscar..."
+                          value={osSearchInput}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setOsSearchInput(val);
+                            if (val.length >= 3 || val.length === 0) {
+                              setOsSearchTerm(val);
+                              // setCurrentPage(1);
+                            }
+                          }}
+                          className="w-full flex-grow sm:w-auto"
+                        />
+                      )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        title="Limpar filtros"
+                        className="shrink-0 w-[54px] sm:w-auto"
+                        onClick={() => {
+                          setOsSearchTerm("");
+                          setOsSearchInput("");
+                          setOsStartDate("");
+                          setOsEndDate("");
+                          setOsFilterStatus("Todas");
+                          setOsSearchType("cod_OS");
+                        }}
+                      >
+                        <LuEraser className="h-5 w-5" />
+                      </Button>
+                    </div>
 
-                    <Button onClick={handleOrderSearch} variant="primary" className="shrink-0"><LuSearch className="mr-2 h-5 w-5" /> Buscar</Button>
+                    <Button
+                      onClick={handleOrderSearch}
+                      variant="primary"
+                      className="shrink-0"
+                    >
+                      <LuSearch className="mr-2 h-5 w-5" />
+                      Buscar
+                    </Button>
                   </div>
 
                   <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full xl:w-auto shrink-0 justify-end">
@@ -1106,6 +1214,7 @@ const VehicleListView = () => {
   const [filteredVehicles, setFilteredVehicles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchInput, setSearchInput] = useState('');
   const [searchType, setSearchType] = useState('placa');
   const [itemsPerPage, setItemsPerPage] = useState(25);
   const [visibleCount, setVisibleCount] = useState(25);
@@ -1125,9 +1234,7 @@ const VehicleListView = () => {
 
   useEffect(() => { fetchVehicles(); }, [fetchVehicles]);
 
-  const handleSearch = (e) => {
-    e.preventDefault();
-    setVisibleCount(itemsPerPage);
+  useEffect(() => {
     const res = vehicles.filter(v => {
       if (!searchTerm) return true;
       const term = searchTerm.toLowerCase();
@@ -1142,6 +1249,10 @@ const VehicleListView = () => {
       }
     });
     setFilteredVehicles(res);
+  }, [searchTerm, searchType, vehicles]);
+
+  const handleSearch = (e) => {
+    e.preventDefault();
   };
 
   const handleItemsPerPageChange = (e) => {
@@ -1154,12 +1265,26 @@ const VehicleListView = () => {
 
   return (
     <Card>
+
+      {/* <CardHeader className='h-16' actions={<Button type="button" onClick={() => navigate('ClientForm', { setSelectedVehicle: null, setVehicleModalOpen: true, scrollToVehicles: true})}> <LuPlus className="mr-2 h-5 w-5" /> Novo veículo </Button>}> Veículos </CardHeader> */}
+      {/* <CardHeader className='h-16' actions={<Button onClick={() => navigate('clients', { selectClientForOS: true })}> <LuPlus className="mr-2 h-5 w-5" /> Novo veículo </Button>}> Veículos </CardHeader> */}
+
+      {/* VehicleFormModal */}
+
       <CardHeader className='h-16' >Veículos</CardHeader>
       <CardContent>
         <div className="mb-6 bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex flex-col xl:flex-row gap-4 items-start xl:items-center justify-between">
           <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-3 w-full xl:w-auto flex-grow">
             {/* Filtros de busca de veículo */}
-            <Select value={searchType} onChange={(e) => setSearchType(e.target.value)} className="w-full sm:w-48 shrink-0">
+            <Select
+              value={searchType}
+              onChange={(e) => {
+                setSearchType(e.target.value);
+                setSearchTerm('');
+                setSearchInput('');
+              }}
+              className="w-full sm:w-48 shrink-0"
+            >
               <optgroup label="Dados do veículo">
                 <option value="placa">Placa</option>
                 <option value="montadora">Montadora</option>
@@ -1171,7 +1296,21 @@ const VehicleListView = () => {
                 <option value="nome_cliente">Nome</option>
               </optgroup>
             </Select>
-            <Input type="text" placeholder="Buscar..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full sm:w-auto flex-grow" />
+            <Input
+              type="text"
+              placeholder="Buscar..."
+              value={searchInput}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSearchInput(val);
+                if (val.length >= 3 || val.length === 0) {
+                  setSearchTerm(val);
+                  setVisibleCount(itemsPerPage);
+                  // setCurrentPage(1);
+                }
+              }}
+              className="w-full sm:w-auto flex-grow"
+            />
             <Button type="submit" variant="primary" className="shrink-0"><LuSearch className="mr-2 h-5 w-5" /> Buscar</Button>
           </form>
           <div className="flex items-center">
@@ -1190,10 +1329,10 @@ const VehicleListView = () => {
             itemsPerPage={itemsPerPage}
             view="vehicles"
             onCreateOs={(v) => {
-              navigate('serviceOrderForm', { 
-                osId: 'new', 
-                vehicleId: v.cod_veiculo, 
-                clientId: clientId 
+              navigate('serviceOrderForm', {
+                osId: 'new',
+                vehicleId: v.cod_veiculo,
+                clientId: v.fk_cod_cliente
               });
             }}
             onViewVehicle={(v) => {
@@ -1259,12 +1398,47 @@ const VehicleFormModal = ({ isOpen, onClose, clientId, vehicle, onSaved }) => {
     try {
       const cleanPlaca = String(formData.placa).replace(/[.\- ]/g, '').toUpperCase();
       const payload = { ...formData, placa: cleanPlaca, ano: parseInt(formData.ano, 10), fk_cod_cliente: parseInt(clientId, 10) };
-      let saved;
-      if (isNewVehicle) { saved = await api(`/clientes/${clientId}/veiculos`, 'POST', payload); }
-      else { saved = await api(`/veiculos/${vehicle.cod_veiculo}`, 'PUT', payload); }
-      alert('Veículo salvo!');
-      onSaved(saved);
-    } catch (err) { setError(err.message); }
+
+      if (isNewVehicle) {
+        try {
+          // Tenta criar o veículo; o backend faz toda a validação de placa
+          const saved = await api(`/clientes/${clientId}/veiculos`, 'POST', payload);
+          alert('Veículo salvo!');
+          onSaved(saved);
+        } catch (err) {
+          // 409 = placa já existe para outro(s) cliente(s) → exibe confirmação
+          if (err instanceof ApiError && err.status === 409 && err.data?.type === 'DUPLICATE_PLATE_OTHER_CLIENT') {
+            if (!window.confirm(err.data.message)) { setLoading(false); return; }
+            // Usuário confirmou: reenvia com force=true para ignorar o conflito
+            const saved = await api(`/clientes/${clientId}/veiculos?force=true`, 'POST', payload);
+            alert('Veículo salvo!'); // Alterar para mensagem Toast
+            onSaved(saved);
+          } else {
+            // 400 (duplicata no mesmo cliente) ou outro erro → exibe mensagem
+            throw err;
+          }
+        }
+      } else {
+        try {
+          // Envia o clienteId para que o backend possa executar a validação de placa
+          const saved = await api(`/veiculos/${vehicle.cod_veiculo}?clienteId=${clientId}`, 'PUT', payload);
+          alert('Veículo salvo!');
+          onSaved(saved);
+        } catch (err) {
+          // 409 = placa já existe para outro(s) cliente(s) → exibe confirmação
+          if (err instanceof ApiError && err.status === 409 && err.data?.type === 'DUPLICATE_PLATE_OTHER_CLIENT') {
+            if (!window.confirm(err.data.message)) { setLoading(false); return; }
+            // Usuário confirmou: reenvia com force=true para ignorar o conflito
+            const saved = await api(`/veiculos/${vehicle.cod_veiculo}?clienteId=${clientId}&force=true`, 'PUT', payload);
+            alert('Veículo salvo!');
+            onSaved(saved);
+          } else {
+            // 400 (duplicata no mesmo cliente) ou outro erro → exibe mensagem no formulário
+            throw err;
+          }
+        }
+      }
+    } catch (err) { setError(err.message); } // Alterar para mensagem Toast
     finally { setLoading(false); }
   };
 
@@ -1300,6 +1474,7 @@ const AllServiceOrders = () => {
 
   const [searchType, setSearchType] = useState('codigo');
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchInput, setSearchInput] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
@@ -1326,7 +1501,17 @@ const AllServiceOrders = () => {
         <div className="mb-6 bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex flex-col xl:flex-row gap-4 items-start xl:items-center justify-between">
           <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-3 w-full xl:w-auto flex-grow">
             {/* Filtros de busca de OS */}
-            <Select value={searchType} onChange={(e) => setSearchType(e.target.value)} className="w-full sm:w-48 shrink-0">
+            <Select
+              value={searchType}
+              onChange={(e) => {
+                setSearchType(e.target.value);
+                setSearchTerm('');
+                setSearchInput('');
+                setStartDate('');
+                setEndDate('');
+              }}
+              className="w-full sm:w-48 shrink-0"
+            >
               <optgroup label="Dados da OS">
                 <option value="codigo">Código</option>
                 <option value="data">Data</option>
@@ -1353,7 +1538,20 @@ const AllServiceOrders = () => {
             ) : searchType === 'data' ? (
               <Input type="date" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full sm:w-auto flex-grow" required />
             ) : (
-              <Input type="text" placeholder="Buscar..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full sm:w-auto flex-grow" />
+              <Input
+                type="text"
+                placeholder="Buscar..."
+                value={searchInput}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSearchInput(val);
+                  if (val.length >= 3 || val.length === 0) {
+                    setSearchTerm(val);
+                    // setCurrentPage(1);
+                  }
+                }}
+                className="w-full sm:w-auto flex-grow"
+              />
             )}
 
             <Button type="submit" variant="primary" className="shrink-0"><LuSearch className="mr-2 h-5 w-5" /> Buscar</Button>
@@ -1466,6 +1664,7 @@ const ServiceOrderForm = ({ params, pdfLibsLoaded }) => {
     }
     setOs(prev => ({ ...prev, [name]: e.target.value }));
   };
+
   const handleItemChange = (idx, e) => {
     const { name, value } = e.target;
     let nextValue = value;
@@ -1475,7 +1674,15 @@ const ServiceOrderForm = ({ params, pdfLibsLoaded }) => {
     }
     setItems(prev => { const n = [...prev]; n[idx] = { ...n[idx], [name]: nextValue }; return n; });
   };
-  const addItem = (tipo) => setItems([...items, { nome_item: '', quantidade: 1, valor: 0.00, tipo: tipo }]);
+
+  const addItem = (tipo) => {
+    const lastItem = items[items.length - 1];
+    if (!lastItem || (lastItem.nome_item && lastItem.quantidade && lastItem.valor)) {
+      setItems([...items, { nome_item: '', quantidade: 1, valor: 0.00, tipo: tipo }]);
+    } else {
+      toastify.warningMessage("Preencha os campos do item atual antes de adicionar um novo.");
+    }
+  }
   const removeItem = (idx) => setItems(prev => prev.filter((_, i) => i !== idx));
   const handlePaymentChange = (val) => setStatus(prev => ({ ...prev, valor_pago: Math.max(0, parseFloat(val || 0)) }));
 
@@ -1525,21 +1732,6 @@ const ServiceOrderForm = ({ params, pdfLibsLoaded }) => {
       }
     } catch (err) { setError(err.message); } finally { setSaving(false); }
   };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
   const handlePrintPDF = async () => {
@@ -1632,12 +1824,12 @@ const ServiceOrderForm = ({ params, pdfLibsLoaded }) => {
 
       <Card>
         <CardHeader actions={<Button type="button" onClick={() => addItem('P')}> <LuPlus className="mr-2 h-5 w-5" /> Peça </Button>}> <LuPackage className="mr-3 h-6 w-6 inline" /> Peças </CardHeader>
-        <CardContent> <OSItemsList items={items} type="P" onItemChange={handleItemChange} onRemoveItem={removeItem} /> </CardContent>
+        <CardContent> <OSItemsList items={items} type="P" onItemChange={handleItemChange} onRemoveItem={removeItem} onAddItem={() => addItem('P')} /> </CardContent>
       </Card>
 
       <Card>
         <CardHeader actions={<Button type="button" onClick={() => addItem('S')}> <LuPlus className="mr-2 h-5 w-5" /> Serviço </Button>}> <LuWrench className="mr-3 h-6 w-6 inline" /> Serviços </CardHeader>
-        <CardContent> <OSItemsList items={items} type="S" onItemChange={handleItemChange} onRemoveItem={removeItem} /> </CardContent>
+        <CardContent> <OSItemsList items={items} type="S" onItemChange={handleItemChange} onRemoveItem={removeItem} onAddItem={() => addItem('S')} /> </CardContent>
       </Card>
 
       <Card>
@@ -1751,7 +1943,6 @@ export default function App() {
       }
       const data = await response.json();
 
-      console.log("Resposta do login:", { status: response.status, data });
       if (!response.ok) throw new Error(data.message || 'Credenciais inválidas.');
 
       localStorage.setItem('authToken', data.token);
@@ -1784,6 +1975,7 @@ export default function App() {
   return (
     <AuthContext.Provider value={authContextValue}>
       <NavigationContext.Provider value={navCtx}>
+        <SystemToastContainer />
         {!token ? <TelaLogin /> : <MainLayout>{renderView()}</MainLayout>}
       </NavigationContext.Provider>
     </AuthContext.Provider>

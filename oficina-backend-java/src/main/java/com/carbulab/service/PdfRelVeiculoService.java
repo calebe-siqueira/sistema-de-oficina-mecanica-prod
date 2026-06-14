@@ -1,7 +1,6 @@
 package com.carbulab.service;
 
 import java.time.LocalDateTime;
-import java.util.Map;
 import java.io.ByteArrayOutputStream;
 
 import org.springframework.stereotype.Service;
@@ -9,6 +8,12 @@ import org.springframework.stereotype.Service;
 import com.itextpdf.text.*;
 import com.itextpdf.text.pdf.*;
 import com.itextpdf.text.pdf.draw.LineSeparator;
+
+import static com.carbulab.utils.ConvesorDeMap.obterDoMapa;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Collections;
 
 @Service
 public class PdfRelVeiculoService {
@@ -30,16 +35,8 @@ public class PdfRelVeiculoService {
             @SuppressWarnings("unchecked")
             Map<String, Object> dados = (Map<String, Object>) dadosRelatorio.get("dados");
 
-            // Verificação segura para evitar ClassCastException
-            // Object ordensObj = dadosRelatorio.get("ordens");
-            // if (!(ordensObj instanceof java.util.List)) {
-            //     throw new IllegalArgumentException("Dados do relatório inválidos: 'ordens' deve ser uma lista.");
-            // }
-            @SuppressWarnings("unchecked")
-            java.util.List<Map<String, Object>> ordens = (java.util.List<Map<String, Object>>) dadosRelatorio.getOrDefault("ordens", java.util.Collections.emptyList());
-
-            // @SuppressWarnings("unchecked")
-            // java.util.List<Map<String, Object>> itens = (java.util.List<Map<String, Object>>) dadosRelatorio.getOrDefault("itens", java.util.Collections.emptyList());
+            // Conversão de Map para List de Map
+            List<Map<String, Object>> ordens = obterDoMapa(dadosRelatorio, "ordens", Collections.emptyList());
 
             // --- Cabeçalho ---
             PdfService.cabeçalho(documento, "RELATÓRIO DE ORDENS DE SERVIÇO POR VEÍCULO");
@@ -51,11 +48,6 @@ public class PdfRelVeiculoService {
             Paragraph paragrafototalDeOSs = new Paragraph("Total de Ordens de Serviço: " + String.valueOf(totalDeOSs), PdfService.helveticaNormal12);
             paragrafototalDeOSs.setSpacingAfter(5);
             documento.add(paragrafototalDeOSs);
-            documento.add(new LineSeparator());
-            
-            Paragraph paragrafoEspaçamento = new Paragraph("");
-            paragrafoEspaçamento.setSpacingAfter(3);
-            documento.add(paragrafoEspaçamento);
             documento.add(new LineSeparator());
 
             double totalRelatorio = 0;
