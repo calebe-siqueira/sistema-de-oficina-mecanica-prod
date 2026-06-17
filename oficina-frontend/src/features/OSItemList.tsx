@@ -40,7 +40,19 @@ const OSItemsList = ({
   }
   
   const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>, localIndex: number) => {
-    if (event.key === 'Enter') {
+    if (event.key === 'Enter' && event.shiftKey) {
+      event.preventDefault();
+      
+      const previousIndex = localIndex - 1;
+      const previousInputId = `nome_item_${type}_${previousIndex}`;
+
+      if (previousIndex >= 0) {
+        const previousInput = document.getElementById(previousInputId);
+        if (previousInput) {
+          previousInput.focus();
+        }
+      }
+    } else if (event.key === 'Enter') {
       event.preventDefault(); // Evita o envio do formulário
       
       const nextIndex = localIndex + 1;
@@ -71,20 +83,6 @@ const OSItemsList = ({
           }
         } else {
           toastify.warningMessage("Preencha os campos do item atual antes de adicionar um novo.");
-        }
-      }
-    }
-    
-    if (event.key === 'Enter' && event.shiftKey) {
-      event.preventDefault();
-      
-      const previousIndex = localIndex - 1;
-      const previousInputId = `nome_item_${type}_${previousIndex}`;
-
-      if (previousIndex >= 0) {
-        const previousInput = document.getElementById(previousInputId);
-        if (previousInput) {
-          previousInput.focus();
         }
       }
     }
