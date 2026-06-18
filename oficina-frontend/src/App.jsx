@@ -1844,6 +1844,20 @@ const ServiceOrderForm = ({ params, pdfLibsLoaded }) => {
               </Select>
               <Input label="Desconto" name="desconto" type="number" min="0" value={os.desconto} onChange={handleOsChange} className="w-1/2" invalid={os.desconto !== '' && !hasValidDiscount} />
             </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Valor pago</label>
+              <div className="flex items-center mt-1">
+                <Button type="button" variant="secondary" onClick={() => handlePaymentChange(parseFloat(status.valor_pago) - 1)}>-</Button>
+                <div className="relative flex-grow mx-2">
+                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-500">R$</span>
+                  <input type="number" min="0" step="1" value={status.valor_pago} onChange={(e) => handlePaymentChange(e.target.value)} className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-md" />
+                </div>
+                <Button type="button" variant="secondary" onClick={() => handlePaymentChange(parseFloat(status.valor_pago) + 1)}>+</Button>
+              </div>
+              <div className={`mt-2 inline-block px-3 py-1 rounded-full text-sm font-bold ${paymentStatusColor}`}>
+                {paymentStatusLabel}
+              </div>
+            </div>
           </div>
           <div className="flex-1 space-y-2 text-right bg-gray-50 p-4 rounded-md">
             <div className="flex justify-between text-lg"><span className="font-medium text-gray-600">Subtotal:</span><span>R$ {subTotal}</span></div>
