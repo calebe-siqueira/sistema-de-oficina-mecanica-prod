@@ -1,35 +1,33 @@
-import React, { useState, useEffect } from 'react';
-import Button from '../components/Button';
-import Pagination from '../components/Pagination';
-import { LuEye, LuSquarePen, LuTrash2, LuPlus, FilePdf } from '../components/Icons';
-import { maskPlaca } from '../utils/maskPlaca';
+import React from 'react';
+import Button from '../components/ui/Button';
+import { TableEmptyState } from '../components/modules/TableEmptyState';
+import { LuEye, LuSquarePen, LuTrash2, LuPlus, FilePdf } from '../components/ui/Icons';
+import { maskPlaca } from '../utils/masks';
+
+import { ResponseVeiculoDTO } from '../types/veiculo';
 
 export interface VehicleListProps {
-  vehicles: any[];
-  loading?: boolean;
-  itemsPerPage?: number;
+  vehicles: ResponseVeiculoDTO[];
   view?: 'vehicles' | 'reports' | 'clientForm';
 
   // Callbacks de ações (de acordo com a view)
-  onViewVehicle?: (vehicle: any) => void;
+  onViewVehicle?: (vehicle: ResponseVeiculoDTO) => void;
   onGenerateReport?: (vehicleId: string | number) => void;
   reportLoading?: boolean;
 
   // Callbacks adicionais para ClientForm
-  onCreateOs?: (vehicle: any) => void;
-  onEditVehicle?: (vehicle: any) => void;
-  onDeleteVehicle?: (vehicle: any) => void;
+  onCreateOs?: (vehicle: ResponseVeiculoDTO) => void;
+  onEditVehicle?: (vehicle: ResponseVeiculoDTO) => void;
+  onDeleteVehicle?: (vehicle: ResponseVeiculoDTO) => void;
 
   // Suporte a destaque de busca (ClientForm)
   osSearchType?: string;
   osSearchTerm?: string;
-  onVehicleClick?: (vehicle: any) => void;
+  onVehicleClick?: (vehicle: ResponseVeiculoDTO) => void;
 }
 
 const VehicleList: React.FC<VehicleListProps> = ({
   vehicles = [],
-  loading = false,
-  itemsPerPage = 25,
   view = 'vehicles',
   onViewVehicle,
   onGenerateReport,
@@ -41,17 +39,7 @@ const VehicleList: React.FC<VehicleListProps> = ({
   osSearchTerm,
   onVehicleClick
 }) => {
-  const [currentPage, setCurrentPage] = useState(1);
-
-  // Reset para página 1 se a lista de veículos mudar significativamente
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [vehicles, itemsPerPage]);
-
-  const totalPages = Math.ceil(vehicles.length / itemsPerPage);
-  const visibleVehicles = vehicles.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
-
-  if (loading) return <p>Carregando veículos...</p>;
+  const visibleVehicles = vehicles;
 
   return (
     <div className="overflow-x-auto">
@@ -92,7 +80,9 @@ const VehicleList: React.FC<VehicleListProps> = ({
         <tbody className="bg-white divide-y divide-gray-200">
           {visibleVehicles.length === 0 ? (
             <tr>
-              <td colSpan={view !== 'clientForm' ? 8 : 7} className="px-6 py-4 text-center text-gray-500">Nenhum veículo encontrado.</td>
+              <td colSpan={view !== 'clientForm' ? 8 : 7}>
+                <TableEmptyState message="Nenhum veículo encontrado" />
+              </td>
             </tr>
           ) : visibleVehicles.map(v => {
             const isHighlighted = osSearchType === 'cod_veiculo' && osSearchTerm === String(v.cod_veiculo);
@@ -106,15 +96,15 @@ const VehicleList: React.FC<VehicleListProps> = ({
                 <td className="px-4 py-4 text-sm font-bold uppercase truncate">{maskPlaca(v.placa)}</td>
 
                 {/* Telas Grandes (XL+) */}
-                <td className="hidden xl:table-cell px-4 py-4 text-sm capitalize truncate">{v.montadora}</td>
-                <td className="hidden xl:table-cell px-4 py-4 text-sm capitalize truncate">{v.modelo}</td>
+                <td className="hidden xl:table-cell px-4 py-4 text-sm capitalize truncate">{v.nome_montadora}</td>
+                <td className="hidden xl:table-cell px-4 py-4 text-sm capitalize truncate">{v.nome_modelo}</td>
 
                 {/* Telas Médias (SM até XL) */}
-                <td className="hidden sm:table-cell xl:hidden px-4 py-4 text-sm capitalize truncate">{v.montadora} {v.modelo}</td>
+                <td className="hidden sm:table-cell xl:hidden px-4 py-4 text-sm capitalize truncate">{v.nome_montadora} {v.nome_modelo}</td>
 
                 {/* Telas Pequenas (Abaixo de SM) */}
                 <td className="sm:hidden px-4 py-4 text-sm capitalize truncate">
-                  {v.montadora} {v.modelo} <br />
+                  {v.nome_montadora} {v.nome_modelo} <br />
                   <span className="text-xs text-gray-500">{v.cor} - {String(v.ano || '').substring(0, 4)}</span>
                 </td>
 
@@ -129,14 +119,14 @@ const VehicleList: React.FC<VehicleListProps> = ({
 
                     <td className="sticky right-0 bg-transparent px-4 py-3 text-sm font-medium w-[125px] text-left z-10">
                       <div className="flex flex-col w-[66px] sm:min-w-[125px] sm:flex-row sm:items-center sm:justify-start gap-2">
-                        
+
                         {/* Ações específicas da View Vehicles */}
                         {view === 'vehicles' && (
                           <>
                             {onCreateOs && (
                               <Button
-                                variant="floating" 
-                                className="py-2.5 bg-green-600 text-xs text-white hover:bg-green-700" 
+                                variant="floating"
+                                className="py-2.5 bg-green-600 text-xs text-white hover:bg-green-700"
                                 onClick={(e) => { e.stopPropagation(); onCreateOs(v); }}
                                 title="Criar OS para este veículo"
                               >
@@ -163,7 +153,7 @@ const VehicleList: React.FC<VehicleListProps> = ({
                               <Button
                                 variant="floating"
                                 className="bg-blue-600 text-white hover:bg-blue-700"
-                                onClick={(e) => { e.stopPropagation(); onGenerateReport(v.cod_veiculo); }}
+                                onClick={(e) => { e.stopPropagation(); onGenerateReport(String(v.cod_veiculo)); }}
                                 disabled={reportLoading}
                                 title="Gerar relatório completo de OSs do veículo"
                               >
@@ -196,8 +186,8 @@ const VehicleList: React.FC<VehicleListProps> = ({
                       <div className="flex flex-col w-[66px] sm:min-w-[177px] sm:flex-row sm:items-center sm:justify-start gap-2">
                         {onCreateOs && (
                           <Button
-                            variant="floating" 
-                            className="py-2.5 bg-green-600 text-xs text-white hover:bg-green-700" 
+                            variant="floating"
+                            className="py-2.5 bg-green-600 text-xs text-white hover:bg-green-700"
                             onClick={(e) => { e.stopPropagation(); onCreateOs(v); }}
                             title="Criar OS para este veículo"
                           >
@@ -206,20 +196,20 @@ const VehicleList: React.FC<VehicleListProps> = ({
                         )}
                         {onEditVehicle && (
                           <Button
-                            variant="floating" 
-                            className="bg-white hover:bg-blue-50 hover:text-blue-900" 
+                            variant="floating"
+                            className="bg-white hover:bg-blue-50 hover:text-blue-900"
                             onClick={(e) => { e.stopPropagation(); onEditVehicle(v); }}
-                            title='Editar veículo' 
+                            title='Editar veículo'
                           >
                             <LuSquarePen className="h-5 w-5" />
                           </Button>
                         )}
                         {onDeleteVehicle && (
                           <Button
-                            variant="floating" 
-                            className="bg-white hover:bg-red-50 text-red-600 hover:text-red-500" 
+                            variant="floating"
+                            className="bg-white hover:bg-red-50 text-red-600 hover:text-red-500"
                             onClick={(e) => { e.stopPropagation(); onDeleteVehicle(v); }}
-                            title='Excluir veículo' 
+                            title='Excluir veículo'
                           >
                             <LuTrash2 className="h-5 w-5" />
                           </Button>
@@ -234,15 +224,6 @@ const VehicleList: React.FC<VehicleListProps> = ({
         </tbody>
       </table>
 
-      {totalPages > 1 && (
-        <div className="flex justify-center mt-4 pb-4">
-          <Pagination
-            currentPage={currentPage}
-            totalPages={totalPages}
-            onPageChange={setCurrentPage}
-          />
-        </div>
-      )}
     </div>
   );
 }

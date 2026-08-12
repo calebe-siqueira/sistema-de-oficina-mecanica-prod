@@ -1,8 +1,8 @@
 import React, { ChangeEvent } from 'react';
-import { LuTrash2 } from '../components/Icons'; // Importando o ícone de lixeira
-import Button from '../components/Button'; // Importando os componentes que criamos
-import Input from '../components/Input';
-import { toastify } from '../components/SystemMessages';
+import { LuTrash2 } from '../components/ui/Icons';
+import Button from '../components/ui/Button';
+import Input from '../components/ui/Input';
+import { toastify } from '../components/modules/SystemMessages';
 
 // 1. Definimos a estrutura de um Item da Ordem de Serviço
 interface OSItem {
@@ -22,14 +22,14 @@ interface OSItemsListProps {
   onAddItem?: () => void;
 }
 
-const OSItemsList = ({ 
-  items, 
-  type, 
-  onItemChange, 
+const OSItemsList = ({
+  items,
+  type,
+  onItemChange,
   onRemoveItem,
   onAddItem
 }: OSItemsListProps) => {
-  
+
   // Mapeamos para manter o índice original do array pai antes do filtro
   const itemsToRender = items
     .map((item, index) => ({ ...item, originalIndex: index }))
@@ -38,11 +38,11 @@ const OSItemsList = ({
   if (itemsToRender.length === 0) {
     return <p className="text-gray-500 py-4 text-center text-sm italic">Nenhum item adicionado.</p>;
   }
-  
+
   const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>, localIndex: number) => {
     if (event.key === 'Enter' && event.shiftKey) {
       event.preventDefault();
-      
+
       const previousIndex = localIndex - 1;
       const previousInputId = `nome_item_${type}_${previousIndex}`;
 
@@ -54,7 +54,7 @@ const OSItemsList = ({
       }
     } else if (event.key === 'Enter') {
       event.preventDefault(); // Evita o envio do formulário
-      
+
       const nextIndex = localIndex + 1;
       const nextInputId = `nome_item_${type}_${nextIndex}`;
       const currentInputId = `nome_item_${type}_${localIndex}`;
@@ -90,61 +90,63 @@ const OSItemsList = ({
 
   return (
     <div className="overflow-x-auto">
-      <table className="min-w-full divide-y divide-gray-200">
+      <table className="table-fixed min-w-full divide-y divide-gray-200">
         <thead>
           <tr className="text-xs uppercase text-gray-500 tracking-wider">
-            <th className="text-left pb-2 font-semibold">Item</th>
-            <th className="w-24 pb-2 font-semibold text-center">Qtd</th>
-            <th className="w-32 pb-2 font-semibold text-center">Valor (R$)</th>
+            <th className="w-full text-left pb-2 font-semibold">Item</th>
+            <th className="min-w-16 lg:min-w-32 pb-2 font-semibold text-center">Qtd</th>
+            <th className="min-w-20 lg:min-w-40 pb-2 font-semibold text-center">Valor (R$)</th>
             <th className="w-12 pb-2"></th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
           {itemsToRender.map((item, localIndex) => (
             <tr key={item.originalIndex} className="hover:bg-gray-50 transition-colors">
-              <td className="py-1 pr-2">
-                <Input 
+              <td className="py-1 pr-1">
+                <Input
                   id={`nome_item_${type}_${localIndex}`}
-                  name="nome_item" 
-                  value={item.nome_item} 
-                  onChange={(e) => onItemChange(item.originalIndex, e)} 
-                  onKeyDown={(e) => handleKeyDown(e, localIndex)} 
+                  name="nome_item"
+                  value={item.nome_item}
+                  onChange={(e) => onItemChange(item.originalIndex, e)}
+                  onKeyDown={(e) => handleKeyDown(e, localIndex)}
                   placeholder="Nome do item"
                 />
               </td>
               <td className="py-1 px-1">
-                <Input 
-                  type="number" 
-                  name="quantidade" 
-                  min="0" 
-                  step="1" 
-                  value={item.quantidade} 
-                  onChange={(e) => onItemChange(item.originalIndex, e)} 
-                  onKeyDown={(e) => handleKeyDown(e, localIndex)}
-                  className="text-center"
-                />
-              </td>
-              <td className="py-1 px-1">
-                <Input 
-                  type="number" 
-                  min="0" 
-                  step="0.1" 
-                  name="valor" 
-                  value={item.valor} 
-                  onChange={(e) => onItemChange(item.originalIndex, e)} 
+                <Input
+                  type="number"
+                  name="quantidade"
+                  min="1"
+                  max="127"
+                  step="1"
+                  value={item.quantidade}
+                  onChange={(e) => onItemChange(item.originalIndex, e)}
                   onKeyDown={(e) => handleKeyDown(e, localIndex)}
                   className="text-right"
                 />
               </td>
-              <td className="py-1 pl-2 text-right">
-                <Button 
-                  type="button" 
-                  variant="ghost" 
+              <td className="py-1 px-1">
+                <Input
+                  type="number"
+                  name="valor"
+                  min="0"
+                  max="9999999"
+                  step="0.1"
+                  value={item.valor}
+                  onChange={(e) => onItemChange(item.originalIndex, e)}
+                  onKeyDown={(e) => handleKeyDown(e, localIndex)}
+                  className="text-right"
+                />
+              </td>
+              <td className="py-1 pl-2 pr-0.5 text-right">
+                <Button
+                  type="button"
+                  variant="ghost"
                   title="Remover item"
-                  onClick={() => onRemoveItem(item.originalIndex)} 
-                  className="text-red-500 hover:text-red-700 p-2"
+                  onClick={() => onRemoveItem(item.originalIndex)}
+                  className="h-[38px] text-red-500 hover:text-red-700 p-2"
                 >
-                  <LuTrash2 className="h-4 w-4"/>
+                  <LuTrash2 className="h-4 w-4" />
                 </Button>
               </td>
             </tr>
