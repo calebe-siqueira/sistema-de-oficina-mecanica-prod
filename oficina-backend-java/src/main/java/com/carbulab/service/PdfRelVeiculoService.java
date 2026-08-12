@@ -5,6 +5,8 @@ import java.io.ByteArrayOutputStream;
 
 import org.springframework.stereotype.Service;
 
+import com.carbulab.exception.PdfGenerationException;
+
 import com.itextpdf.text.*;
 import com.itextpdf.text.pdf.*;
 import com.itextpdf.text.pdf.draw.LineSeparator;
@@ -19,7 +21,7 @@ import java.util.Collections;
 public class PdfRelVeiculoService {
     
     // Método para gerar RELATÓRIO de Ordens de Serviço por veículo
-    public byte[] gerarRelatorioOsPorVeiculo(Map<String, Object> dadosRelatorio) throws DocumentException {
+    public byte[] gerarRelatorioOsPorVeiculo(Map<String, Object> dadosRelatorio) {
         Document documento = new Document();
         ByteArrayOutputStream out = new ByteArrayOutputStream();
 
@@ -54,8 +56,8 @@ public class PdfRelVeiculoService {
 
             // Listagem das OSs
             for (int i = 0; i < totalDeOSs; i++) {
-                String dataOs = PdfService.dataFormatada(ordens.get(i).get("data_OS") != null ? ordens.get(i).get("data_OS") : "N/A");
-                String codOs = ordens.get(i).get("cod_OS") != null ? ordens.get(i).get("cod_OS").toString() : "N/A";
+                String dataOs = PdfService.dataFormatada(ordens.get(i).get("data_os") != null ? ordens.get(i).get("data_os") : "N/A");
+                String codOs = ordens.get(i).get("cod_os") != null ? ordens.get(i).get("cod_os").toString() : "N/A";
                 String quilometragem = ordens.get(i).get("quilometragem") != null ? ordens.get(i).get("quilometragem").toString() : "N/A";
                 String descricao = ordens.get(i).get("descricao") != null ? ordens.get(i).get("descricao").toString() : "N/A";
                 String status = (ordens.get(i).get("status_servico") != null && !ordens.get(i).get("status_servico").toString().isEmpty()) ? PdfService.converteStatus(Integer.parseInt(ordens.get(i).get("status_servico").toString())) : "N/A";
@@ -153,7 +155,7 @@ public class PdfRelVeiculoService {
 
 
         } catch (DocumentException e) {
-            throw new DocumentException("Erro ao gerar PDF: " + e.getMessage(), e);
+            throw new PdfGenerationException("Erro ao gerar PDF: " + e.getMessage(), e);
         } finally {
             documento.close();
         }

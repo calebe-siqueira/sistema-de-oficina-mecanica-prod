@@ -6,6 +6,8 @@ import java.io.ByteArrayOutputStream;
 
 import org.springframework.stereotype.Service;
 
+import com.carbulab.exception.PdfGenerationException;
+
 import com.itextpdf.text.pdf.PdfPTable;
 import com.itextpdf.text.pdf.PdfWriter;
 import com.itextpdf.text.pdf.draw.LineSeparator;
@@ -17,7 +19,7 @@ import com.itextpdf.text.*;
 public class PdfOsService {
     
     // Método adaptado de GerarPdf.java para retornar bytes em vez de salvar arquivo
-    public static byte[] gerarOsPdf(Map<String, Object> dadosOs) throws DocumentException {
+    public static byte[] gerarOsPdf(Map<String, Object> dadosOs) {
         Document documento = new Document();
         ByteArrayOutputStream out = new ByteArrayOutputStream();
 
@@ -25,11 +27,11 @@ public class PdfOsService {
             PdfWriter.getInstance(documento, out);
             documento.open();
             
-            documento.addTitle("OS " + dadosOs.get("cod_OS") + " Carbulab - " + PdfService.dataEHoraFormatada(LocalDateTime.now()));
+            documento.addTitle("OS " + dadosOs.get("cod_os") + " Carbulab - " + PdfService.dataEHoraFormatada(LocalDateTime.now()));
             documento.addAuthor(PdfService.nomeEmpresa);
             
-            String codigoOS = (dadosOs.get("cod_OS") != null) ? dadosOs.get("cod_OS").toString() : null;
-            Object dataOs = dadosOs.get("data_OS");
+            String codigoOS = (dadosOs.get("cod_os") != null) ? dadosOs.get("cod_os").toString() : null;
+            Object dataOs = dadosOs.get("data_os");
             String quilometragem = (dadosOs.get("quilometragem") != null) ? dadosOs.get("quilometragem").toString() : null;
             String descricao = (dadosOs.get("descricao") != null) ? dadosOs.get("descricao").toString() : null;
             String status = PdfService.converteStatus(Integer.parseInt(dadosOs.get("status").toString())) != null ? PdfService.converteStatus(Integer.parseInt(dadosOs.get("status").toString())) : "N/A";
@@ -163,6 +165,8 @@ public class PdfOsService {
             paragrafoAssinatura.setAlignment(Element.ALIGN_RIGHT);
             documento.add(paragrafoAssinatura);
 
+        } catch (DocumentException e) {
+            throw new PdfGenerationException("Erro ao gerar PDF da OS", e);
         } finally {
             documento.close();
         }
