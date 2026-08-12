@@ -17,14 +17,14 @@ import com.carbulab.exception.TokenException;
 @Service
 public class TokenService {
     
-    @Value("${api.security.token.secret}")
-    private String tokenSecret;
+  // @Value("${api.security.token.secret}")
+  private String tokenSecret = "erjVi9CmVUY@}+_3h!*G5%)zmL@AaKzJW?rm:U-Do3V!8UxDnG.xzx?6}-?23%H}";
 
-	@Value("${api.security.token.expiration}")
-	private Integer tokenExpiration;
+	// @Value("${api.security.token.expiration}")
+	private Integer tokenExpiration = 1;
 
-	@Value("${api.security.refresh-token.expiration}")
-	private Integer refreshTokenExpiration;
+	// @Value("${api.security.refresh-token.expiration}")
+	private Integer refreshTokenExpiration = 12;
 
     public String generateToken(Usuario usuario) {
         try {
