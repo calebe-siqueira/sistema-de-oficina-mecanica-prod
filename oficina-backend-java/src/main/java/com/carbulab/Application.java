@@ -23,7 +23,7 @@ public class Application {
             @Override
             public void addCorsMappings(CorsRegistry registry) {
                 registry.addMapping("/**")
-                        .allowedOrigins("http://localhost:5173", "http://127.0.0.1:5173") // Em produção, trocar pelo domínio específico
+                        .allowedOrigins("https://oficina-mecanica.nohalls.com", "http://localhost:5173", "http://127.0.0.1:5173") // Em produção, trocar pelo domínio específico
                         .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                         .allowedHeaders("*")
                         .allowCredentials(true);
