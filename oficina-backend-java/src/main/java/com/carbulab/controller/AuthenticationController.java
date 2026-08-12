@@ -149,7 +149,7 @@ public class AuthenticationController {
     private ResponseCookie createCookie(String name, String value, int maxAge) {
         return ResponseCookie.from(name, value)
                 .httpOnly(true)
-                .secure(false) // Mudar para true em produção (requer HTTPS)
+                .secure(true) // Mudar para true em produção (requer HTTPS)
                 .path("/")
                 .maxAge(maxAge)
                 .sameSite("Strict") // Lax permite navegação básica. Strict é melhor para segurança extra contra CSRF.

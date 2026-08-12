@@ -53,10 +53,10 @@ public class SecurityFilter extends OncePerRequestFilter {
                             // Adiciona o novo cookie na resposta da requisição atual
                             ResponseCookie cookie = ResponseCookie.from("accessToken", newAccessToken)
                                 .httpOnly(true)
-                                .secure(false) // true em prod
+                                .secure(true) // true em prod
                                 .path("/")
                                 .maxAge(tokenService.getAccessTokenExpirationSeconds())
-                                .sameSite("Lax")
+                                .sameSite("Strict")
                                 .build();
                                 
                             response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
