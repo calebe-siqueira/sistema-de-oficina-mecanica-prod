@@ -56,7 +56,7 @@ public class SecurityFilter extends OncePerRequestFilter {
                                 .secure(true) // true em prod
                                 .path("/")
                                 .maxAge(tokenService.getAccessTokenExpirationSeconds())
-                                .sameSite("Strict")
+                                .sameSite("Lax")
                                 .build();
                                 
                             response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
