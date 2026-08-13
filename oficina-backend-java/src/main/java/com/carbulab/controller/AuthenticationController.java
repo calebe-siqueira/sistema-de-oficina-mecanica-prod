@@ -152,7 +152,7 @@ public class AuthenticationController {
                 .secure(true) // Mudar para true em produção (requer HTTPS)
                 .path("/")
                 .maxAge(maxAge)
-                .sameSite("None") // Lax permite navegação básica. Strict é melhor para segurança extra contra CSRF.
+                .sameSite("Strict") // Lax permite navegação básica. Strict é melhor para segurança extra contra CSRF.
                 .build();
     }
 
