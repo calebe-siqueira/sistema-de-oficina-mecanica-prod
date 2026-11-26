@@ -25,4 +25,11 @@ public class Modelo {
     @ManyToOne
     @JoinColumn(name = "fk_cod_montadora")
     private Montadora montadora;
+
+    public void setNomeModelo(String nomeModelo) {
+        if (nomeModelo != null && nomeModelo.trim().isEmpty()) {
+            nomeModelo = null;
+        }
+        this.nomeModelo = nomeModelo;
+    }
 }

@@ -1,76 +1,151 @@
 // --> Utilitários envolvendo DATAS
+import { parse, parseISO, isValid, format, subYears, isWithinInterval } from 'date-fns';
 
-// Pega a data atual formatada como YYYY-MM-DD
-export const getLocalTodayString = () => {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, '0');
-  const day = String(today.getDate()).padStart(2, '0');
-  
-  return `${year}-${month}-${day}`;
-};
+export type DateValue = string | number | Date | number[] | null | undefined;
 
-// Formata datas recebidas de diversas formas
-export const formatSafeDate = (val: string | number | Date | number[] | null | undefined): string => {
-  if (!val) return '';
-  try {
-    if (typeof val === 'string') {
-      // 1. Trata formato ISO (ex: 1995-05-26T00:00:00)
-      if (val.includes('T')) return val.split('T')[0];
+// --- Instâncias globais do Intl para máxima performance ---
+// Instanciar o Intl fora das funções evita recriá-lo em loops (ex: renderização de tabelas),
+// garantindo um ganho expressivo de performance.
+const dateFormatter = new Intl.DateTimeFormat('pt-BR', { 
+  timeZone: 'America/Sao_Paulo' 
+});
 
-      // 2. Trata formato brasileiro (ex: 26/05/1995) convertendo para yyyy-MM-dd
-      if (val.includes('/')) {
-        const [day, month, year] = val.split('/');
-        return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-      }
+const dateTimeFormatter = new Intl.DateTimeFormat('pt-BR', { 
+  timeZone: 'America/Sao_Paulo', 
+  dateStyle: 'short', 
+  timeStyle: 'short' 
+});
 
-      return val;
+const dateTimeSecFormatter = new Intl.DateTimeFormat('pt-BR', { 
+  timeZone: 'America/Sao_Paulo', 
+  dateStyle: 'short', 
+  timeStyle: 'medium' 
+});
+
+// --- Funções de Parsing Seguras (SRP & Validação Estrita) ---
+
+/**
+ * Faz o parsing de qualquer formato de entrada e garante o retorno de um objeto Date nativo VÁLIDO (ou null).
+ * O date-fns protege contra o bug de fuso horário, interpretando as datas sempre em horário local.
+ */
+export const parseDateSafe = (val: DateValue): Date | null => {
+  if (val === null || val === undefined || val === '') return null;
+
+  let parsedDate: Date;
+
+  if (Array.isArray(val)) {
+    if (val.length < 3) return null;
+    // O JS nativo usa mês 0-11. Como o array vem 1-12 (do backend), subtraímos 1 no mês.
+    parsedDate = new Date(
+      Number(val[0]),
+      Number(val[1]) - 1, 
+      Number(val[2]),
+      val[3] !== undefined ? Number(val[3]) : 0,
+      val[4] !== undefined ? Number(val[4]) : 0,
+      val[5] !== undefined ? Number(val[5]) : 0
+    );
+  } else if (val instanceof Date) {
+    parsedDate = val;
+  } else if (typeof val === 'number') {
+    parsedDate = new Date(val);
+  } else if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (!trimmed) return null;
+
+    if (trimmed.includes('/')) {
+      // Identifica o formato BR baseado na presença de horas e minutos
+      const hasSeconds = (trimmed.match(/:/g) || []).length === 2;
+      const hasTime = trimmed.includes(':');
+      
+      const formatStr = hasSeconds ? 'dd/MM/yyyy HH:mm:ss' : 
+                        hasTime ? 'dd/MM/yyyy HH:mm' : 
+                        'dd/MM/yyyy';
+
+      parsedDate = parse(trimmed, formatStr, new Date());
+    } else {
+      // parseISO do date-fns resolve perfeitamente strings como "2024-10-24" sem transformar em UTC
+      parsedDate = parseISO(trimmed);
     }
-    if (typeof val === 'number') return new Date(val).toISOString().split('T')[0];
-    if (Array.isArray(val)) return `${val[0]}-${String(val[1] || '').padStart(2, '0')}-${String(val[2] || '').padStart(2, '0')}`;
-    if (val instanceof Date) return val.toISOString().split('T')[0];
-  } catch (e) {
-    console.error("Erro ao formatar data:", val, e);
+  } else {
+    return null;
   }
-  return '';
+
+  // isValid do date-fns barra o bug das "datas inventadas" (ex: 31/02/2024)
+  return isValid(parsedDate) ? parsedDate : null;
 };
 
-// Retorna uma data mínima e máxima (range) para a OS, com base no ano de fabricação do veículo e na data atual
-export const getOsDateRange = (ano_fabricacao?: string | number | null): [string, string] => {
-  // Data da OS não pode ser maior que hoje (futura)
-  const max = getLocalTodayString();
+// --- Funções Públicas de Formatação (KISS & DRY) ---
 
-  // Data da OS não pode ser menor que o ano de fabricação do veículo
+/**
+ * Formata datas para o formato ISO (yyyy-MM-dd).
+ * Uso indicado: envio para API/banco de dados.
+ */
+export const formatDateToISO = (val: DateValue): string => {
+  const date = parseDateSafe(val);
+  // date-fns é mais confiável que o Intl para gerar ISO estrito YYYY-MM-DD
+  return date ? format(date, 'yyyy-MM-dd') : '';
+};
+
+/**
+ * Formata datas para o padrão brasileiro (dd/MM/yyyy).
+ * Uso indicado: exibição na interface do usuário.
+ * @param val Data a ser formatada
+ * @param fallback Valor retornado caso a data seja inválida ou vazia (padrão: '')
+ */
+export const formatDateBR = (val: DateValue, fallback: string = ''): string => {
+  const date = parseDateSafe(val);
+  return date ? dateFormatter.format(date) : fallback;
+};
+
+/**
+ * Formata datas para o padrão brasileiro com horário (dd/MM/yyyy HH:mm ou dd/MM/yyyy HH:mm:ss).
+ * Uso indicado: logs, auditoria, históricos e registros onde o horário é relevante.
+ */
+export const formatDateTimeBR = (
+  val: DateValue,
+  fallback: string = '',
+  includeSeconds: boolean = false
+): string => {
+  const date = parseDateSafe(val);
+  if (!date) return fallback;
+  
+  return includeSeconds ? dateTimeSecFormatter.format(date) : dateTimeFormatter.format(date);
+};
+
+// --- Funções de Regras de Negócio (Lógica & Ranges) ---
+
+export const getLocalTodayString = (): string => formatDateToISO(new Date());
+
+/**
+ * Retorna uma data mínima e máxima (range) para a OS, com base no ano de fabricação do veículo e na data atual
+ */
+export const getOsDateRange = (anoFabricacao?: string | number | null): [string, string] => {
+  const max = getLocalTodayString();
   let min = '1886-01-01'; // Data da criação do primeiro automóvel como fallback
 
-  if (ano_fabricacao) {
-    // 2. Extrai o ano e converte com base 10 de forma segura
-    const ano_fabricacao_int = parseInt(String(ano_fabricacao).substring(0, 4), 10);
-    
+  if (anoFabricacao) {
+    // Extrai o ano e converte com base 10 de forma segura
+    const ano = parseInt(String(anoFabricacao).substring(0, 4), 10);
     // Garante que não vai quebrar se a conversão resultar em NaN
-    if (!isNaN(ano_fabricacao_int)) {
-      min = `${ano_fabricacao_int - 1}-01-01`;
-    }
+    if (!isNaN(ano)) min = `${ano - 1}-01-01`;
   }
 
   return [min, max];
 };
 
-// Retorna uma data mínima e máxima (range) para data de nascimento, com base na data atual (idade mínima 10 anos)
 export const getBirthDateRange = (): [string, string] => {
-  const today = new Date();
-
-  // Subtrai 10 anos da data atual (idade mínima para fazer o cadastro é 10 anos)
-  today.setFullYear(today.getFullYear() - 10);
-  const max = today.toISOString().split('T')[0];
-
-  // Define a data mínima de nascimento como 01/01/1900
   const min = '1900-01-01';
-  return [min, max];
+  // O date-fns resolve o salto de anos bissextos de forma segura com subYears
+  const maxDate = subYears(new Date(), 10);
+  return [min, formatDateToISO(maxDate)];
 };
 
-// Verifica se uma data está dentro de um intervalo (range)
-export const dateInRange = (value: string | null | undefined, min: string, max: string): boolean => {
-  if (!value) return false;
-  return value >= min && value <= max;
+export const dateInRange = (value: DateValue, min: DateValue, max: DateValue): boolean => {
+  const targetDate = parseDateSafe(value);
+  const minDate = parseDateSafe(min);
+  const maxDate = parseDateSafe(max);
+
+  if (!targetDate || !minDate || !maxDate) return false;
+
+  return isWithinInterval(targetDate, { start: minDate, end: maxDate });
 };

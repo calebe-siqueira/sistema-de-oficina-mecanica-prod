@@ -1,12 +1,16 @@
 package com.carbulab.controller;
 
 import jakarta.validation.Valid;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 import com.carbulab.dto.ordem_servico.CreateOsDTO;
 import com.carbulab.dto.ordem_servico.ResponseOsDTO;
@@ -14,6 +18,7 @@ import com.carbulab.dto.veiculo.CreateVeiculoDTO;
 import com.carbulab.dto.veiculo.ResponseVeiculoDTO;
 import com.carbulab.dto.veiculo.ResponseVeiculoDetailsDTO;
 import com.carbulab.dto.veiculo.UpdateVeiculoDTO;
+import com.carbulab.dto.veiculo.SearchVeiculoDTO;
 import com.carbulab.repositories.OrdemServicoRepository;
 import com.carbulab.service.OrdemServicoService;
 import com.carbulab.service.PdfRelVeiculoService;
@@ -42,8 +47,9 @@ public class VeiculoController {
     }
 
 	@GetMapping
-    public ResponseEntity<List<ResponseVeiculoDTO>> listarTodos() {
-        return ResponseEntity.ok(veiculoService.listarTodos());
+    @PreAuthorize("hasAnyRole('ADMIN', 'MECANICO')")
+    public ResponseEntity<Page<ResponseVeiculoDTO>> listarTodos(@PageableDefault(size = 50) Pageable pageable) {
+        return ResponseEntity.ok(veiculoService.listarTodos(pageable));
     }
 
 	/**
@@ -62,40 +68,55 @@ public class VeiculoController {
      *      (pega os orçamentos, ordens de serviço abertas e serviço em andamento de 2015 a 2022)
      */
     @GetMapping("/filtro-os")
-    public ResponseEntity<List<ResponseVeiculoDTO>> listarTodosFiltroOs(
+    @PreAuthorize("hasAnyRole('ADMIN', 'MECANICO')")
+    public ResponseEntity<Page<ResponseVeiculoDTO>> listarTodosFiltroOs(
             @RequestParam(value = "status-servico", required = false) List<Integer> statusServico,
             @RequestParam(value = "dataInicio-servico", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dataInicio,
-            @RequestParam(value = "dataFim-servico", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dataFim) {
+            @RequestParam(value = "dataFim-servico", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dataFim,
+            @PageableDefault(size = 50) Pageable pageable) {
         
         if (statusServico == null && dataInicio == null && dataFim == null) {
-            return ResponseEntity.ok(veiculoService.listarTodos());
+            return ResponseEntity.ok(veiculoService.listarTodos(pageable));
         }
-        return ResponseEntity.ok(veiculoService.listarComFiltroOs(statusServico, dataInicio, dataFim));
+        return ResponseEntity.ok(veiculoService.listarComFiltroOs(statusServico, dataInicio, dataFim, pageable));
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MECANICO') or @securityRules.isVeiculoOwner(authentication, #id)")
     public ResponseEntity<ResponseVeiculoDTO> buscarPorId(@PathVariable Integer id) {
         return ResponseEntity.ok(veiculoService.buscarPorId(id));
     }
 
     @GetMapping("/{id}/details")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MECANICO') or @securityRules.isVeiculoOwner(authentication, #id)")
     public ResponseEntity<ResponseVeiculoDetailsDTO> buscarDetalhesPorId(@PathVariable Integer id) {
 		ResponseVeiculoDetailsDTO details = veiculoService.buscarDetalhesPorId(id);
-		System.out.println(details);
         return ResponseEntity.ok(details);
     }
 
     @GetMapping("/search/placa")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MECANICO')")
     public ResponseEntity<ResponseVeiculoDTO> buscarPorPlaca(@RequestParam("placa") String placa) {
         return ResponseEntity.ok(veiculoService.buscarPorPlaca(placa));
     }
 
+    @GetMapping("/search")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MECANICO')")
+    public ResponseEntity<Page<ResponseVeiculoDTO>> buscar(
+            @RequestParam(required = false) String term,
+            @RequestParam(required = false) String type,
+            @PageableDefault(size = 50) Pageable pageable) {
+        return ResponseEntity.ok(veiculoService.buscar(new SearchVeiculoDTO(type, term), pageable));
+    }
+
     @GetMapping("/{id}/os")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MECANICO') or @securityRules.isVeiculoOwner(authentication, #id)")
     public ResponseEntity<List<ResponseOsDTO>> listarOs(@PathVariable Integer id) {
         return ResponseEntity.ok(ordemServicoService.listarOsPorVeiculo(id));
     }
 
     @GetMapping("/{id}/quantidade-os")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MECANICO') or @securityRules.isVeiculoOwner(authentication, #id)")
     public ResponseEntity<Long> contarOs(@PathVariable Integer id) {
         return ResponseEntity.ok(ordemServicoService.contarOsPorVeiculo(id));
     }
@@ -115,6 +136,7 @@ public class VeiculoController {
      *      (pega os orçamentos, ordens de serviço abertas e serviço em andamento de 2015 a 2022)
      */
     @GetMapping("/{id}/os/pdf")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MECANICO') or @securityRules.isVeiculoOwner(authentication, #id)")
     public ResponseEntity<byte[]> getVeiculoOsPdf(
             @PathVariable Integer id,
             @RequestParam(value = "status", required = false, defaultValue = "4") List<Integer> status,
@@ -131,6 +153,7 @@ public class VeiculoController {
     }
 
     @PostMapping("/{id_veiculo}/os")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MECANICO')")
     public ResponseEntity<ResponseOsDTO> criarOs(@PathVariable Integer id_veiculo,
             @RequestBody @Valid CreateOsDTO dto) {
 
@@ -144,6 +167,7 @@ public class VeiculoController {
     }
 
     @PostMapping
+    @PreAuthorize("hasAnyRole('ADMIN', 'MECANICO')")
     public ResponseEntity<ResponseVeiculoDTO> criar(@RequestBody @Valid CreateVeiculoDTO dto,
             @RequestParam(defaultValue = "false") boolean force) {
         ResponseVeiculoDTO criado = veiculoService.criar(dto, force);
@@ -151,12 +175,14 @@ public class VeiculoController {
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MECANICO')")
     public ResponseEntity<ResponseVeiculoDTO> atualizar(@PathVariable Integer id,
             @RequestBody @Valid UpdateVeiculoDTO dto, @RequestParam(defaultValue = "false") boolean force) {
         return ResponseEntity.ok(veiculoService.atualizar(id, dto, force));
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MECANICO')")
     public ResponseEntity<Void> deletar(@PathVariable Integer id) {
         veiculoService.deletar(id);
         return ResponseEntity.noContent().build();
@@ -165,18 +191,21 @@ public class VeiculoController {
     // ======================== RESTORE (LIXEIRA) ==========================
 
     @GetMapping("/lixeira")
-    public ResponseEntity<List<ResponseVeiculoDTO>> listarLixeira() {
-        List<ResponseVeiculoDTO> veiculosDeletados = veiculoService.listarLixeira();
+    @PreAuthorize("hasAnyRole('ADMIN')")
+    public ResponseEntity<Page<ResponseVeiculoDTO>> listarLixeira(@PageableDefault(size = 50) Pageable pageable) {
+        Page<ResponseVeiculoDTO> veiculosDeletados = veiculoService.listarLixeira(pageable);
         return ResponseEntity.ok(veiculosDeletados);
     }
 
     @PutMapping("/lixeira/{id}/restaurar")
+    @PreAuthorize("hasAnyRole('ADMIN')")
     public ResponseEntity<Void> restaurar(@PathVariable Integer id) {
         veiculoService.restaurar(id);
         return ResponseEntity.ok().build();
     }
 
     @DeleteMapping("/lixeira/{id}/permanente")
+    @PreAuthorize("hasAnyRole('ADMIN')")
     public ResponseEntity<Void> deletarPermanentemente(@PathVariable Integer id) {
         veiculoService.deletarPermanentemente(id);
         return ResponseEntity.noContent().build();

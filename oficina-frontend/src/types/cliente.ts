@@ -59,3 +59,17 @@ export type SearchClienteDTO = {
   termo: string;
   tipo: string;
 };
+
+export type ResponseAtivarAcessoDTO = {
+  login: string;
+  senha_temporaria?: string;
+  email_enviado?: boolean;
+  mensagem: string;
+};
+
+export type StatusAcessoClienteDTO = {
+  tem_acesso: boolean;
+  login?: string | null;
+  email?: string | null;
+};
+

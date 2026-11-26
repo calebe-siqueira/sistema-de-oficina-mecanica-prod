@@ -14,6 +14,11 @@ export class ApiError extends Error {
   }
 }
 
+// Interface para as opções customizadas
+export interface ApiRequestOptions {
+  suppressErrorToast?: boolean;
+}
+
 export const useApi = () => {
   const authContext = useContext(AuthContext);
 
@@ -24,23 +29,27 @@ export const useApi = () => {
   const { logout } = authContext;
 
   const request = useCallback(
-    async (endpoint: string, method: string = 'GET', body: any = null): Promise<any> => {
+    async (
+      endpoint: string,
+      method: string = 'GET',
+      body: any = null,
+      options: ApiRequestOptions = {} // Recebe as opções customizadas
+    ): Promise<any> => {
       try {
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
         
-        const options: RequestInit = { 
+        const fetchOptions: RequestInit = { 
           method, 
           headers,
           credentials: 'include' // Envia os cookies HttpOnly
         };
-        if (body) options.body = JSON.stringify(body);
+        if (body) fetchOptions.body = JSON.stringify(body);
         
-        const response = await fetch(`/api${endpoint}`, options);
+        const response = await fetch(`/api${endpoint}`, fetchOptions);
         
         if (response.status === 401 || response.status === 403) {
           logout();
-          const expiredMessage = 'Sessão expirada ou acesso negado. Faça login novamente.';
-          throw new ApiError(expiredMessage, response.status, null);
+          throw new ApiError('Sessão expirada ou acesso negado. Faça login novamente.', response.status, null);
         }
         
         if (!response.ok) {
@@ -50,8 +59,13 @@ export const useApi = () => {
         
         if (response.status === 204) return null;
         return response.json();
+
       } catch (error: any) {
-        toastify.errorMessage(error.message, error);
+        // Só exibe o toast se o componente chamador não pediu para silenciar
+        if (!options.suppressErrorToast) {
+          toastify.errorMessage(error.message, error);
+        }
+        // Sempre propaga o erro para que a lógica de negócio do componente possa reagir
         throw error;
       }
     },

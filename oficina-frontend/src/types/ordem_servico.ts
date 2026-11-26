@@ -37,7 +37,7 @@ export type ResponseOsDTO = {
   data_os: string;
   quilometragem: number | null;
   descricao: string | null;
-  fk_cod_veiculo: number;
+  fk_cod_veiculo: number | null;
   fk_cod_cliente: number | null;
   placa: string;
   modelo: Modelo | null;

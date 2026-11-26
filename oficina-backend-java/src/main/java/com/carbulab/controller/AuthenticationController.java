@@ -18,14 +18,22 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.access.prepost.PreAuthorize;
 
+import com.carbulab.domain.cliente.Cliente;
 import com.carbulab.domain.usuario.Usuario;
+import com.carbulab.domain.usuario.UsuarioFuncao;
 import com.carbulab.dto.auth.AuthenticationDTO;
+import com.carbulab.dto.auth.ConfirmarRecuperacaoSenhaDTO;
 import com.carbulab.dto.auth.ResponseLoginDTO;
+import com.carbulab.dto.auth.SolicitarRecuperacaoSenhaDTO;
 import com.carbulab.dto.usuario.CreateUsuarioDTO;
 import com.carbulab.dto.usuario.UpdateUsuarioDTO;
 import com.carbulab.infra.security.TokenService;
+import com.carbulab.service.RecuperacaoSenhaService;
+import com.carbulab.service.TermosDeUsoService;
 import com.carbulab.service.UsuarioService;
+import com.carbulab.repositories.ClienteRepository;
 import com.carbulab.repositories.UsuarioRepository;
 import com.carbulab.exception.InvalidCredentialsException;
 
@@ -41,16 +49,25 @@ public class AuthenticationController {
     private final TokenService tokenService;
     private final UsuarioService usuarioService;
     private final UsuarioRepository usuarioRepository;
+    private final ClienteRepository clienteRepository;
+    private final RecuperacaoSenhaService recuperacaoSenhaService;
+    private final TermosDeUsoService termosDeUsoService;
 
     public AuthenticationController(
             AuthenticationManager authenticationManager,
             TokenService tokenService,
             UsuarioService usuarioService,
-            UsuarioRepository usuarioRepository) {
+            UsuarioRepository usuarioRepository,
+            ClienteRepository clienteRepository,
+            RecuperacaoSenhaService recuperacaoSenhaService,
+            TermosDeUsoService termosDeUsoService) {
         this.authenticationManager = authenticationManager;
         this.tokenService = tokenService;
         this.usuarioService = usuarioService;
         this.usuarioRepository = usuarioRepository;
+        this.clienteRepository = clienteRepository;
+        this.recuperacaoSenhaService = recuperacaoSenhaService;
+        this.termosDeUsoService = termosDeUsoService;
     }
 
     @PostMapping("/login")
@@ -60,6 +77,10 @@ public class AuthenticationController {
             var auth = this.authenticationManager.authenticate(usernamePassword);
 
             Usuario usuario = (Usuario) auth.getPrincipal();
+            java.time.LocalDateTime agora = java.time.LocalDateTime.now();
+            usuario.setUltimoAcesso(agora);
+            usuarioRepository.atualizarUltimoAcesso(usuario.getCod_usuario(), agora);
+
             String accessToken = tokenService.generateToken(usuario);
             String refreshToken = tokenService.generateRefreshToken(usuario);
 
@@ -67,11 +88,27 @@ public class AuthenticationController {
             headers.add(HttpHeaders.SET_COOKIE, createCookie("accessToken", accessToken, tokenService.getAccessTokenExpirationSeconds()).toString());
             headers.add(HttpHeaders.SET_COOKIE, createCookie("refreshToken", refreshToken, tokenService.getRefreshTokenExpirationSeconds()).toString());
 
+            Long codCliente = null;
+            if (usuario.getFuncao() == UsuarioFuncao.CLIENTE) {
+                codCliente = usuario.getFk_cod_cliente();
+                if (codCliente == null && usuario.getEmail() != null) {
+                    codCliente = clienteRepository.findByEmailIgnoreCase(usuario.getEmail())
+                        .map(Cliente::getCod_cliente)
+                        .orElse(null);
+                }
+            }
+
+            boolean termosAceitos = termosDeUsoService.isTermosAceitos(usuario);
+
             var responseBody = new ResponseLoginDTO(
                 usuario.getCod_usuario(), 
                 usuario.getNome(), 
-                usuario.getLogin(), 
-                usuario.getFuncao().name()
+                usuario.getUsername(), 
+                usuario.getFuncao().name(),
+                codCliente,
+                usuario.getUltimoAcesso(),
+                usuario.getUltimaAlteracaoSenha(),
+                termosAceitos
             );
 
             return ResponseEntity.ok().headers(headers).body(responseBody);
@@ -123,24 +160,57 @@ public class AuthenticationController {
             return ResponseEntity.status(401).build();
         }
 
-        Usuario usuario = (Usuario) authentication.getPrincipal();
+        Usuario principal = (Usuario) authentication.getPrincipal();
+        Usuario usuario = usuarioRepository.findById(principal.getCod_usuario()).orElse(principal);
+
+        Long codCliente = null;
+        if (usuario.getFuncao() == UsuarioFuncao.CLIENTE) {
+            codCliente = usuario.getFk_cod_cliente();
+            if (codCliente == null && usuario.getEmail() != null) {
+                codCliente = clienteRepository.findByEmailIgnoreCase(usuario.getEmail())
+                    .map(Cliente::getCod_cliente)
+                    .orElse(null);
+            }
+        }
+
+        boolean termosAceitos = termosDeUsoService.isTermosAceitos(usuario);
+
         var responseBody = new ResponseLoginDTO(
             usuario.getCod_usuario(), 
             usuario.getNome(), 
-            usuario.getLogin(), 
-            usuario.getFuncao().name()
+            usuario.getUsername(), 
+            usuario.getFuncao().name(),
+            codCliente,
+            usuario.getUltimoAcesso(),
+            usuario.getUltimaAlteracaoSenha(),
+            termosAceitos
         );
 
         return ResponseEntity.ok(responseBody);
     }
 
+    @PostMapping("/recuperar-senha/solicitar")
+    public ResponseEntity<java.util.Map<String, String>> solicitarRecuperacaoSenha(@RequestBody @Valid SolicitarRecuperacaoSenhaDTO dto) {
+        recuperacaoSenhaService.solicitarRecuperacao(dto);
+        return ResponseEntity.ok(java.util.Map.of("message", "Se o e-mail ou login estiver cadastrado, um código de verificação foi enviado."));
+    }
+
+    @PostMapping("/recuperar-senha/confirmar")
+    public ResponseEntity<java.util.Map<String, String>> confirmarRecuperacaoSenha(@RequestBody @Valid ConfirmarRecuperacaoSenhaDTO dto) {
+        recuperacaoSenhaService.confirmarRecuperacao(dto);
+        return ResponseEntity.ok(java.util.Map.of("message", "Senha redefinida com sucesso!"));
+    }
+
+
     @PostMapping("/register")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<?> register(@RequestBody @Valid CreateUsuarioDTO registerData) {
         this.usuarioService.registrarUsuario(registerData);
         return ResponseEntity.ok().build();
     }
 
     @PutMapping("/update")
+    @PreAuthorize("@securityRules.canUpdateUser(authentication, #updateData.cod_usuario)")
     public ResponseEntity<?> update(@RequestBody @Valid UpdateUsuarioDTO updateData) {
         this.usuarioService.atualizarUsuario(updateData);
         return ResponseEntity.ok().build();
@@ -157,17 +227,20 @@ public class AuthenticationController {
     }
 
     @GetMapping("/lixeira")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<java.util.List<Usuario>> listarLixeira() {
         return ResponseEntity.ok(usuarioService.listarLixeira());
     }
 
     @PutMapping("/lixeira/{id}/restaurar")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Void> restaurar(@PathVariable Long id) {
         usuarioService.restaurar(id);
         return ResponseEntity.ok().build();
     }
 
     @DeleteMapping("/lixeira/{id}/permanente")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Void> deletarPermanentemente(@PathVariable Long id) {
         usuarioService.deletarPermanentemente(id);
         return ResponseEntity.noContent().build();

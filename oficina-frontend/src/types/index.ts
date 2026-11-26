@@ -4,3 +4,5 @@ export * from './dashboard';
 export * from './ordem_servico';
 export * from './usuario';
 export * from './veiculo';
+export * from './page';
+export * from './meuPerfil';

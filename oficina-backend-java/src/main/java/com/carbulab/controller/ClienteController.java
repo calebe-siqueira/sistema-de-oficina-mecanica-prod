@@ -2,6 +2,9 @@ package com.carbulab.controller;
 
 import java.util.*;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -12,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 import com.carbulab.dto.cliente.CreateClienteDTO;
 import com.carbulab.dto.cliente.ResponseClienteDTO;
@@ -21,8 +25,15 @@ import com.carbulab.dto.ordem_servico.ResponseOsDTO;
 import com.carbulab.dto.veiculo.CreateVeiculoDTO;
 import com.carbulab.dto.veiculo.ResponseVeiculoDTO;
 import com.carbulab.service.ClienteService;
+import com.carbulab.service.OrdemServicoService;
+import com.carbulab.service.VeiculoService;
 
 import jakarta.validation.Valid;
+
+import com.carbulab.dto.cliente.AtivarAcessoClienteDTO;
+import com.carbulab.dto.cliente.ResponseAtivarAcessoDTO;
+import com.carbulab.dto.cliente.StatusAcessoClienteDTO;
+import com.carbulab.service.ClienteAccessService;
 
 /**
  * Controlador para CLIENTE
@@ -43,13 +54,19 @@ import jakarta.validation.Valid;
 public class ClienteController {
 
 	private final ClienteService service;
-	private final com.carbulab.service.VeiculoService veiculoService;
-	private final com.carbulab.service.OrdemServicoService ordemServicoService;
+	private final VeiculoService veiculoService;
+	private final OrdemServicoService ordemServicoService;
+	private final ClienteAccessService clienteAccessService;
 
-	public ClienteController(ClienteService service, com.carbulab.service.VeiculoService veiculoService, com.carbulab.service.OrdemServicoService ordemServicoService) {
+	public ClienteController(
+			ClienteService service,
+			VeiculoService veiculoService,
+			OrdemServicoService ordemServicoService,
+			ClienteAccessService clienteAccessService) {
 		this.service = service;
 		this.veiculoService = veiculoService;
 		this.ordemServicoService = ordemServicoService;
+		this.clienteAccessService = clienteAccessService;
 	}
 
 	// ======================== GET ==========================
@@ -59,8 +76,9 @@ public class ClienteController {
 	 * GET /api/clientes
 	 */
 	@GetMapping
-	public ResponseEntity<List<ResponseClienteDTO>> listar() {
-		List<ResponseClienteDTO> clientes = service.listarTodos();
+	@PreAuthorize("hasAnyRole('ADMIN', 'MECANICO')")
+	public ResponseEntity<Page<ResponseClienteDTO>> listar(@PageableDefault(size = 50) Pageable pageable) {
+		Page<ResponseClienteDTO> clientes = service.listarTodos(pageable);
 		return ResponseEntity.ok(clientes);
 	}
 
@@ -74,6 +92,7 @@ public class ClienteController {
 	 * GET /api/clientes/{id}?all=true					→ tudo (compatibilidade com frontend antigo)
 	 */
 	@GetMapping("/{id}")
+	@PreAuthorize("hasAnyRole('ADMIN', 'MECANICO') or @securityRules.isClienteOwner(authentication, #id)")
 	public ResponseEntity<ResponseClienteDTO> buscarPorId(
 			@PathVariable Long id,
 			@RequestParam(name = "endereco", required = false, defaultValue = "false") boolean includeEndereco,
@@ -89,12 +108,14 @@ public class ClienteController {
 	}
 
 	@GetMapping("/{id}/veiculos")
+	@PreAuthorize("hasAnyRole('ADMIN', 'MECANICO') or @securityRules.isClienteOwner(authentication, #id)")
 	public ResponseEntity<List<ResponseVeiculoDTO>> listarVeiculos(@PathVariable Long id) {
 		List<ResponseVeiculoDTO> veiculos = veiculoService.listarVeiculosPorCliente(id);
 		return ResponseEntity.ok(veiculos);
 	}
 
 	@GetMapping("/{id}/os")
+	@PreAuthorize("hasAnyRole('ADMIN', 'MECANICO') or @securityRules.isClienteOwner(authentication, #id)")
 	public ResponseEntity<List<ResponseOsDTO>> listarOs(@PathVariable Long id) {
 		List<ResponseOsDTO> osList = ordemServicoService.listarOsPorCliente(id);
 		return ResponseEntity.ok(osList);
@@ -102,16 +123,17 @@ public class ClienteController {
 
 	/**
 	 * Buscar clientes com filtros
-	 * GET /api/clientes/search?termo=valor&tipo=nome
+	 * GET /api/clientes/search?term=valor&type=nome
 	 */
 	@GetMapping("/search")
-	public ResponseEntity<List<Map<String, Object>>> buscar(
+	@PreAuthorize("hasAnyRole('ADMIN', 'MECANICO')")
+	public ResponseEntity<Page<Map<String, Object>>> buscar(
 		@RequestParam(name = "term") String termo,
-		@RequestParam(name = "type") String tipo
-		// @RequestParam(name = "limit", required = false, defaultValue = "") Integer limit
+		@RequestParam(name = "type") String tipo,
+		@PageableDefault(size = 50) Pageable pageable
 	) {
 		SearchClienteDTO searchDto = new SearchClienteDTO(termo, tipo);
-		List<Map<String, Object>> resultado = service.buscar(searchDto);
+		Page<Map<String, Object>> resultado = service.buscar(searchDto, pageable);
 		return ResponseEntity.ok(resultado);
 	}
 
@@ -122,6 +144,7 @@ public class ClienteController {
 	 * POST /api/clientes
 	 */
 	@PostMapping
+	@PreAuthorize("hasAnyRole('ADMIN', 'MECANICO')")
 	public ResponseEntity<ResponseClienteDTO> criar(@RequestBody CreateClienteDTO dto) {
 		ResponseClienteDTO novoCliente = service.criar(dto);
 		
@@ -129,6 +152,7 @@ public class ClienteController {
 	}
 
 	@PostMapping("/{id}/veiculos")
+	@PreAuthorize("hasAnyRole('ADMIN', 'MECANICO')")
 	public ResponseEntity<ResponseVeiculoDTO> criarVeiculo(@PathVariable Long id, @RequestBody @Valid CreateVeiculoDTO dto, @RequestParam(defaultValue = "false") boolean force) {
 		CreateVeiculoDTO dtoComCliente = new CreateVeiculoDTO(
 			dto.nomeMontadora(), dto.nomeModelo(), dto.ano(), dto.placa(), dto.cor(), dto.combustivel(), dto.tipo(), id
@@ -137,6 +161,42 @@ public class ClienteController {
 		return ResponseEntity.status(201).body(criado);
 	}
 
+	/**
+	 * Ativar acesso do cliente ao sistema (cria usuário tb_usuario e envia credenciais por e-mail)
+	 * POST /api/clientes/{id}/ativar-acesso
+	 */
+	@PostMapping("/{id}/ativar-acesso")
+	@PreAuthorize("hasAnyRole('ADMIN', 'MECANICO')")
+	public ResponseEntity<ResponseAtivarAcessoDTO> ativarAcesso(
+			@PathVariable Long id,
+			@RequestBody(required = false) AtivarAcessoClienteDTO dto) {
+		ResponseAtivarAcessoDTO response = clienteAccessService.ativarAcesso(id, dto);
+		return ResponseEntity.status(201).body(response);
+	}
+
+	/**
+	 * Desativar acesso do cliente ao sistema
+	 * DELETE /api/clientes/{id}/desativar-acesso
+	 */
+	@DeleteMapping("/{id}/desativar-acesso")
+	@PreAuthorize("hasRole('ADMIN')")
+	public ResponseEntity<Void> desativarAcesso(@PathVariable Long id) {
+		clienteAccessService.desativaAcesso(id);
+		return ResponseEntity.noContent().build();
+	}
+
+	/**
+	 * Consultar se o cliente possui acesso ao sistema
+	 * GET /api/clientes/{id}/tem-acesso
+	 */
+	@GetMapping("/{id}/tem-acesso")
+	@PreAuthorize("hasAnyRole('ADMIN', 'MECANICO')")
+	public ResponseEntity<StatusAcessoClienteDTO> verificarStatusAcesso(@PathVariable Long id) {
+		StatusAcessoClienteDTO status = clienteAccessService.verificarStatusAcesso(id);
+		return ResponseEntity.ok(status);
+	}
+
+
 	// ======================== PUT ==========================
 
 	/**
@@ -144,9 +204,10 @@ public class ClienteController {
 	 * PUT /api/clientes/{id}
 	 */
 	@PutMapping("/{id}")
+	@PreAuthorize("hasAnyRole('ADMIN', 'MECANICO')")
 	public ResponseEntity<ResponseClienteDTO> atualizar(
 			@PathVariable Long id,
-			@RequestBody UpdateClienteDTO dto) {
+			@RequestBody @Valid UpdateClienteDTO dto) {
 		
 		ResponseClienteDTO clienteAtualizado = service.atualizar(id, dto);
 		return ResponseEntity.ok(clienteAtualizado);
@@ -159,6 +220,7 @@ public class ClienteController {
 	 * DELETE /api/clientes/{id}
 	 */
 	@DeleteMapping("/{id}")
+	@PreAuthorize("hasAnyRole('ADMIN', 'MECANICO')")
 	public ResponseEntity<Void> deletar(@PathVariable Long id) {
 		service.deletar(id);
 		return ResponseEntity.noContent().build();
@@ -167,18 +229,21 @@ public class ClienteController {
 	// ======================== RESTORE (LIXEIRA) ==========================
 
 	@GetMapping("/lixeira")
-	public ResponseEntity<List<ResponseClienteDTO>> listarLixeira() {
-		List<ResponseClienteDTO> clientesDeletados = service.listarLixeira();
+	@PreAuthorize("hasAnyRole('ADMIN')")
+	public ResponseEntity<Page<ResponseClienteDTO>> listarLixeira(@PageableDefault(size = 50) Pageable pageable) {
+		Page<ResponseClienteDTO> clientesDeletados = service.listarLixeira(pageable);
 		return ResponseEntity.ok(clientesDeletados);
 	}
 
 	@PutMapping("/lixeira/{id}/restaurar")
+	@PreAuthorize("hasAnyRole('ADMIN')")
 	public ResponseEntity<Void> restaurar(@PathVariable Long id) {
 		service.restaurar(id);
 		return ResponseEntity.ok().build();
 	}
 
 	@DeleteMapping("/lixeira/{id}/permanente")
+	@PreAuthorize("hasAnyRole('ADMIN')")
 	public ResponseEntity<Void> deletarPermanentemente(@PathVariable Long id) {
 		service.deletarPermanentemente(id);
 		return ResponseEntity.noContent().build();

@@ -21,4 +21,11 @@ public class Montadora {
 
     @JsonProperty("nome_montadora")
     private String nomeMontadora;
+
+    public void setNomeMontadora(String nomeMontadora) {
+        if (nomeMontadora != null && nomeMontadora.trim().isEmpty()) {
+            nomeMontadora = null;
+        }
+        this.nomeMontadora = nomeMontadora;
+    }
 }

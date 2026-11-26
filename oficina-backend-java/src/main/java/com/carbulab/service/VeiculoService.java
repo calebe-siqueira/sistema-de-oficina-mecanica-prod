@@ -15,6 +15,8 @@ import com.carbulab.dto.veiculo.CreateVeiculoDTO;
 import com.carbulab.dto.veiculo.ResponseVeiculoDTO;
 import com.carbulab.dto.veiculo.ResponseVeiculoDetailsDTO;
 import com.carbulab.dto.veiculo.UpdateVeiculoDTO;
+import com.carbulab.dto.veiculo.SearchVeiculoDTO;
+import com.carbulab.specifications.VeiculoSpecification;
 import com.carbulab.exception.BusinessValidationException;
 import com.carbulab.exception.DuplicateResourceException;
 import com.carbulab.exception.PlacaConflictException;
@@ -36,6 +38,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.PageImpl;
 
 @Service
 public class VeiculoService {
@@ -99,9 +105,8 @@ public class VeiculoService {
 		}
 	}
 
-	public List<ResponseVeiculoDTO> listarLixeira() {
-		return repository.findAllDeleted()
-				.stream()
+	public Page<ResponseVeiculoDTO> listarLixeira(Pageable pageable) {
+		return repository.findAllDeleted(pageable)
 				.map(v -> {
 					ResponseVeiculoDTO dto = new ResponseVeiculoDTO(v);
 					if (v.getCliente() == null) {
@@ -116,8 +121,7 @@ public class VeiculoService {
 						} catch (Exception e) {}
 					}
 					return dto;
-				})
-				.toList();
+				});
 	}
 
 	// ==============================================================
@@ -139,14 +143,17 @@ public class VeiculoService {
 				});
 	}
 
-	public List<ResponseVeiculoDTO> listarTodos() {
-		return repository.findAll()
-				.stream()
-				.map(ResponseVeiculoDTO::new)
-				.toList();
+	public Page<ResponseVeiculoDTO> listarTodos(Pageable pageable) {
+		return repository.findAll(VeiculoSpecification.ativo(), pageable)
+				.map(ResponseVeiculoDTO::new);
 	}
 
-	public List<ResponseVeiculoDTO> listarComFiltroOs(List<Integer> status, LocalDate dataInicio, LocalDate dataFim) {
+	public Page<ResponseVeiculoDTO> buscar(SearchVeiculoDTO search, Pageable pageable) {
+		return repository.findAll(VeiculoSpecification.dinamico(search.tipo(), search.termo()), pageable)
+				.map(ResponseVeiculoDTO::new);
+	}
+
+	public Page<ResponseVeiculoDTO> listarComFiltroOs(List<Integer> status, LocalDate dataInicio, LocalDate dataFim, Pageable pageable) {
 		StringBuilder sql = new StringBuilder(
 			"SELECT DISTINCT v.cod_veiculo FROM tb_veiculo v " +
 			"JOIN tb_ordem_servico os ON os.fk_cod_veiculo = v.cod_veiculo " +
@@ -169,15 +176,23 @@ public class VeiculoService {
 			params.add(java.sql.Date.valueOf(dataFim));
 		}
 
+		String countSql = "SELECT COUNT(DISTINCT v.cod_veiculo) " + sql.substring(sql.indexOf("FROM"));
+		Long total = jdbcTemplate.queryForObject(countSql, Long.class, params.toArray());
+
+		sql.append(" ORDER BY v.cod_veiculo DESC LIMIT ? OFFSET ?");
+		params.add(pageable.getPageSize());
+		params.add(pageable.getOffset());
+
 		List<Integer> ids = jdbcTemplate.queryForList(sql.toString(), Integer.class, params.toArray());
 
 		if (ids.isEmpty()) {
-			return new ArrayList<>();
+			return Page.empty(pageable);
 		}
 
-		return repository.findAllById(ids).stream()
+		List<ResponseVeiculoDTO> content = repository.findAllById(ids).stream()
 				.map(ResponseVeiculoDTO::new)
 				.toList();
+		return new PageImpl<>(content, pageable, total != null ? total : 0);
 	}
 
 	public ResponseVeiculoDTO buscarPorId(Integer id) {
@@ -193,9 +208,10 @@ public class VeiculoService {
 	}
 
 	public ResponseVeiculoDTO buscarPorPlaca(String placa) {
-		String placaLimpa = placa.replaceAll("[-]", "").toUpperCase();
-		String placaMercosul = ConsultaPorPlaca.adaptaPlacaParaFormatoInverso_MercosulAntigo(placaLimpa);
-		List<String> placas = placaMercosul != null ? List.of(placaLimpa, placaMercosul) : List.of(placaLimpa);
+		List<String> placas = ConsultaPorPlaca.obterVariantes(placa);
+		if (placas.isEmpty()) {
+			throw new ResourceNotFoundException("Placa não informada.");
+		}
 
 		List<Veiculo> veiculos = repository.findByPlacaInAndDeletedAtIsNull(placas);
 		if (veiculos.isEmpty()) {
@@ -214,46 +230,43 @@ public class VeiculoService {
 				.toList();
 	}
 
+	public Page<ResponseVeiculoDTO> listarVeiculosPorClientePaginado(Long clienteId, Pageable pageable) {
+		if (!clienteRepository.existsById(clienteId)) {
+			throw new ResourceNotFoundException("Cliente não encontrado com ID: " + clienteId);
+		}
+		return repository.findByClienteIdAtivoPaged(clienteId, pageable)
+				.map(ResponseVeiculoDTO::new);
+	}
+
+	public Page<ResponseVeiculoDTO> buscarVeiculosPorClienteEPlaca(Long clienteId, String placa, Pageable pageable) {
+		if (!clienteRepository.existsById(clienteId)) {
+			throw new ResourceNotFoundException("Cliente não encontrado com ID: " + clienteId);
+		}
+		var termos = ConsultaPorPlaca.obterTermosConsulta(placa);
+		if (termos.termo1().isBlank()) {
+			return repository.findByClienteIdAtivoPaged(clienteId, pageable)
+					.map(ResponseVeiculoDTO::new);
+		}
+
+		return repository.findByClienteIdAndPlacaLikeAtivo(clienteId, termos.termo1(), termos.termo2(), pageable)
+				.map(ResponseVeiculoDTO::new);
+	}
+
 	@Transactional
 	public ResponseVeiculoDTO criar(CreateVeiculoDTO dto, boolean force) {
-		String placaLimpa = dto.placa().replaceAll("[-]", "").toUpperCase();
-		String placaMercosul = ConsultaPorPlaca.adaptaPlacaParaFormatoInverso_MercosulAntigo(placaLimpa);
-		List<String> placas = placaMercosul != null ? List.of(placaLimpa, placaMercosul) : List.of(placaLimpa);
-
-		List<Veiculo> veiculosExistentes = repository.findByPlacaInAndDeletedAtIsNull(placas);
-
+		String placaNormalizada = ConsultaPorPlaca.normalizar(dto.placa());
 		Cliente cliente = clienteRepository.findById(dto.fk_cod_cliente())
 				.orElseThrow(
 						() -> new ResourceNotFoundException("Cliente não encontrado com ID: " + dto.fk_cod_cliente()));
 
-		// Validação da placa
-		boolean existeParaOutroCliente = false;
-		List<Map<String, Object>> donosAntigos = new ArrayList<>();
-		for (Veiculo v : veiculosExistentes) {
-			if (v.getCliente().getCod_cliente() == cliente.getCod_cliente()) {
-				throw new DuplicateResourceException(
-					"Veículo não salvo. \nJá existe um veículo cadastrado com essa placa para o cliente atual");
-			} else {
-				existeParaOutroCliente = true;
-				Map<String, Object> map = new HashMap<>();
-				map.put("cod_cliente", v.getCliente().getCod_cliente());
-				map.put("nome_cliente", v.getCliente().getNome());
-				map.put("cpf_cnpj", v.getCliente().getCpf_cnpj());
-				donosAntigos.add(map);
-			}
-		}
-
-		if (existeParaOutroCliente && !force) {
-			// Erro lançado ao tentar criar um novo veículo cuja placa já existe para outro cliente
-			throw new PlacaConflictException(gerarMensagemListandoDonosAntigos(donosAntigos), donosAntigos);
-		} 
+		validarPlacaDisponivel(placaNormalizada, cliente.getCod_cliente(), null, force);
 
 		// Cria um novo veículo
 		Veiculo veiculoASalvar = new Carro();
 		Modelo modelo = resolverModelo(dto.nomeMontadora(), dto.nomeModelo());
 		veiculoASalvar.setModelo(modelo);
 		veiculoASalvar.setAno(dto.ano());
-		veiculoASalvar.setPlaca(placaLimpa);
+		veiculoASalvar.setPlaca(placaNormalizada);
 		veiculoASalvar.setCor(dto.cor());
 		veiculoASalvar.setCombustivel(dto.combustivel());
 		veiculoASalvar.setCliente(cliente);
@@ -268,58 +281,100 @@ public class VeiculoService {
 		Veiculo veiculo = repository.findById(id)
 				.orElseThrow(() -> new ResourceNotFoundException("Veículo não encontrado com ID: " + id));
 
-		if (dto.nomeMontadora() != null || dto.nomeModelo() != null) {
-			String mMontadora = dto.nomeMontadora() != null ? dto.nomeMontadora()
-					: (veiculo.getModelo() != null ? veiculo.getModelo().getMontadora().getNomeMontadora() : "");
-			String mModelo = dto.nomeModelo() != null ? dto.nomeModelo()
+		if (dto.nomeMontadora().isPresent() || dto.nomeModelo().isPresent()) {
+			if ((dto.nomeMontadora().isPresent() && (dto.nomeMontadora().get() == null || dto.nomeMontadora().get().isBlank()))
+					|| (dto.nomeModelo().isPresent() && (dto.nomeModelo().get() == null || dto.nomeModelo().get().isBlank()))) {
+				throw new BusinessValidationException("Montadora e modelo são obrigatórios.");
+			}
+			String mMontadora = dto.nomeMontadora().isPresent()
+					? dto.nomeMontadora().get()
+					: (veiculo.getModelo() != null && veiculo.getModelo().getMontadora() != null
+							? veiculo.getModelo().getMontadora().getNomeMontadora()
+							: "");
+			String mModelo = dto.nomeModelo().isPresent()
+					? dto.nomeModelo().get()
 					: (veiculo.getModelo() != null ? veiculo.getModelo().getNomeModelo() : "");
 			veiculo.setModelo(resolverModelo(mMontadora, mModelo));
 		}
-		if (dto.ano() != null)
-			veiculo.setAno(dto.ano());
-		if (dto.cor() != null)
-			veiculo.setCor(dto.cor());
-		if (dto.combustivel() != null)
-			veiculo.setCombustivel(dto.combustivel());
 
-		if (dto.placa() != null) {
-			String placaLimpa = dto.placa().replaceAll("[-]", "").toUpperCase();
-			if (!placaLimpa.equals(veiculo.getPlaca())) {
-				String placaMercosul = ConsultaPorPlaca.adaptaPlacaParaFormatoInverso_MercosulAntigo(placaLimpa);
-				List<String> placas = placaMercosul != null ? List.of(placaLimpa, placaMercosul) : List.of(placaLimpa);
-
-				List<Veiculo> veiculosExistentes = repository.findByPlacaInAndDeletedAtIsNull(placas);
-				
-				// Validação da placa
-				boolean existeParaOutroCliente = false;
-				List<Map<String, Object>> donosAntigos = new ArrayList<>();
-				for (Veiculo v : veiculosExistentes) {
-					if (v.getCod_veiculo() != veiculo.getCod_veiculo()) {
-						if (v.getCliente().getCod_cliente() == veiculo.getCliente().getCod_cliente()) {
-							throw new DuplicateResourceException(
-								"Veículo não salvo. \nJá existe um veículo cadastrado com essa placa para o cliente atual");
-						} else {
-							existeParaOutroCliente = true;
-							Map<String, Object> map = new HashMap<>();
-							map.put("cod_cliente", v.getCliente().getCod_cliente());
-							map.put("nome_cliente", v.getCliente().getNome());
-							map.put("cpf_cnpj", v.getCliente().getCpf_cnpj());
-							donosAntigos.add(map);
-						}
-					}
-				}
-
-				if (existeParaOutroCliente && !force) {
-					// Erro lançado ao tentar criar um novo veículo cuja placa já existe para outro cliente
-					throw new PlacaConflictException(gerarMensagemListandoDonosAntigos(donosAntigos), donosAntigos);
-				} 
-
-				veiculo.setPlaca(placaLimpa);
+		if (dto.ano().isPresent()) {
+			if (dto.ano().get() == null) {
+				throw new BusinessValidationException("Ano de fabricação é obrigatório.");
 			}
+			veiculo.setAno(dto.ano().get());
+		}
+
+		dto.cor().ifPresent(veiculo::setCor);
+		dto.combustivel().ifPresent(veiculo::setCombustivel);
+
+		if (dto.tipo().isPresent()) {
+			String novoTipo = dto.tipo().get();
+			if (novoTipo == null || !"C".equalsIgnoreCase(novoTipo.trim())) {
+				throw new BusinessValidationException("Tipo de veículo inválido. Apenas 'C' é suportado.");
+			}
+		}
+
+		boolean clienteAlterado = false;
+		if (dto.fk_cod_cliente().isPresent()) {
+			Long novoClienteId = dto.fk_cod_cliente().get();
+			if (novoClienteId == null) {
+				throw new BusinessValidationException("O ID do cliente (fk_cod_cliente) é obrigatório.");
+			}
+			if (veiculo.getCliente() == null || veiculo.getCliente().getCod_cliente() != novoClienteId) {
+				Cliente novoCliente = clienteRepository.findById(novoClienteId)
+						.orElseThrow(() -> new ResourceNotFoundException("Cliente não encontrado com ID: " + novoClienteId));
+				veiculo.setCliente(novoCliente);
+				clienteAlterado = true;
+			}
+		}
+
+		Long clienteIdAtual = veiculo.getCliente() != null ? veiculo.getCliente().getCod_cliente() : null;
+
+		if (dto.placa().isPresent()) {
+			String placaInformada = dto.placa().get();
+			if (placaInformada == null || placaInformada.isBlank()) {
+				veiculo.setPlaca(null); // Lança BusinessValidationException consistente
+			}
+			String placaNormalizada = ConsultaPorPlaca.normalizar(placaInformada);
+			if (!placaNormalizada.equals(veiculo.getPlaca()) || clienteAlterado) {
+				validarPlacaDisponivel(placaNormalizada, clienteIdAtual, veiculo.getCod_veiculo(), force);
+				veiculo.setPlaca(placaNormalizada);
+			}
+		} else if (clienteAlterado && veiculo.getPlaca() != null) {
+			validarPlacaDisponivel(veiculo.getPlaca(), clienteIdAtual, veiculo.getCod_veiculo(), force);
 		}
 
 		Veiculo salvo = repository.save(veiculo);
 		return new ResponseVeiculoDTO(salvo);
+	}
+
+	private void validarPlacaDisponivel(String placaNormalizada, Long clienteId, Integer excludeVeiculoId, boolean force) {
+		List<String> placas = ConsultaPorPlaca.obterVariantes(placaNormalizada);
+		List<Veiculo> veiculosExistentes = repository.findByPlacaInAndDeletedAtIsNull(placas);
+
+		boolean existeParaOutroCliente = false;
+		List<Map<String, Object>> donosAntigos = new ArrayList<>();
+		for (Veiculo v : veiculosExistentes) {
+			if (excludeVeiculoId != null && v.getCod_veiculo() == excludeVeiculoId) {
+				continue;
+			}
+			if (clienteId != null && v.getCliente() != null && v.getCliente().getCod_cliente() == clienteId) {
+				throw new DuplicateResourceException(
+						"Veículo não salvo. \nJá existe um veículo cadastrado com essa placa para o cliente atual");
+			}
+			existeParaOutroCliente = true;
+			Map<String, Object> map = new HashMap<>();
+			if (v.getCliente() != null) {
+				map.put("cod_cliente", v.getCliente().getCod_cliente());
+				map.put("nome_cliente", v.getCliente().getNome());
+				map.put("cpf_cnpj", v.getCliente().getCpf_cnpj());
+			}
+			donosAntigos.add(map);
+		}
+
+		if (existeParaOutroCliente && !force) {
+			throw new PlacaConflictException(gerarMensagemListandoDonosAntigos(donosAntigos), donosAntigos);
+		}
 	}
 
 	@Transactional
@@ -432,13 +487,13 @@ public class VeiculoService {
 		// Mensagem de erro lançada ao tentar criar um novo veículo cuja placa já existe para outro cliente
 		return donosAntigos.size() == 1
 			? "Já existe um veículo cadastrado com essa placa para outro cliente (Nome: " +
-				donosAntigos.get(0).get("nome_cliente").toString().toUpperCase() + "). Deseja prosseguir?"
+				(donosAntigos.get(0).get("nome_cliente") != null ? donosAntigos.get(0).get("nome_cliente").toString().toUpperCase() : "") + "). Deseja prosseguir?"
 			: String.format(
 				"Já existem veículos cadastrados com essa placa para outros %d clientes:\n\n%s.\n\nDeseja prosseguir?",
 				donosAntigos.size(),
 				donosAntigos.stream()
 					.map(donoAntigo -> String.format("- %s",
-							donoAntigo.get("nome_cliente").toString().toUpperCase()))
+							donoAntigo.get("nome_cliente") != null ? donoAntigo.get("nome_cliente").toString().toUpperCase() : ""))
 					.collect(Collectors.joining(",\n")));
 	}
 }

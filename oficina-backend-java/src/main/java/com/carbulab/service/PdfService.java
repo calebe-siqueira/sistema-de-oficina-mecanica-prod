@@ -97,7 +97,8 @@ public class PdfService {
         String montadora = dados != null && (dados.get("montadora") != null) ? dados.get("montadora").toString() : "N/A";
         String modelo = dados != null && (dados.get("modelo") != null) ? dados.get("modelo").toString() : "N/A";
         String cor = dados != null && (dados.get("cor") != null) ? dados.get("cor").toString() : "N/A";
-        String ano = dados != null && (dados.get("ano") != null) ? dados.get("ano").toString().substring(0, 4) : "N/A";
+        String anoStr = dados != null && (dados.get("ano") != null) ? dados.get("ano").toString() : "N/A";
+        String ano = !anoStr.equals("N/A") && anoStr.length() >= 4 ? anoStr.substring(0, 4) : anoStr;
         String combustivel = dados != null && (dados.get("combustivel") != null) ? dados.get("combustivel").toString() : "N/A";
         
         // --- Dados do Cliente e do Veículo ---

@@ -1,12 +1,68 @@
-import { useState, useRef, useEffect } from 'react';
-import { LuChevronDown } from './Icons';
+import { useState, useRef, useEffect, ReactNode } from 'react';
+import {
+  ChevronDownIcon,
+  TriangleAlertIcon,
+  CheckIcon,
+  InfoIcon,
+  CloseIcon,
+} from './Icons';
 
-export function InlineAlert({ error }: { error?: string | null }) {
-  // Estado para controlar a expansão do alerta
+export type InlineAlertVariant = 'error' | 'success' | 'warning' | 'info';
+
+export interface InlineAlertProps {
+  /** Mensagem a ser exibida */
+  message?: string | null;
+  /** Variante visual e semântica do alerta */
+  variant?: InlineAlertVariant;
+  /** Classes adicionais para customização */
+  className?: string;
+  /** Ícone customizado (se omitido, usa o padrão conforme a variante) */
+  icon?: ReactNode;
+  /** Callback para dispensar o alerta */
+  onDismiss?: () => void;
+  /** Controla se o alerta deve rolar e focar automaticamente ao ser exibido */
+  autoScroll?: boolean;
+}
+
+const variantStyles: Record<
+  InlineAlertVariant,
+  { container: string; icon: string; button: string }
+> = {
+  error: {
+    container: 'text-red-700 bg-red-50 border border-red-200 focus-visible:ring-red-600',
+    icon: 'text-red-600',
+    button: 'text-red-600 hover:bg-red-100 focus-visible:ring-red-600',
+  },
+  success: {
+    container: 'text-emerald-800 bg-emerald-50 border border-emerald-200 focus-visible:ring-emerald-600',
+    icon: 'text-emerald-600',
+    button: 'text-emerald-700 hover:bg-emerald-100 focus-visible:ring-emerald-600',
+  },
+  warning: {
+    container: 'text-amber-800 bg-amber-50 border border-amber-200 focus-visible:ring-amber-600',
+    icon: 'text-amber-600',
+    button: 'text-amber-700 hover:bg-amber-100 focus-visible:ring-amber-600',
+  },
+  info: {
+    container: 'text-blue-800 bg-blue-50 border border-blue-200 focus-visible:ring-blue-600',
+    icon: 'text-blue-600',
+    button: 'text-blue-700 hover:bg-blue-100 focus-visible:ring-blue-600',
+  },
+};
+
+export function InlineAlert({
+  message,
+  variant = 'error',
+  className = '',
+  icon,
+  onDismiss,
+  autoScroll = true,
+}: InlineAlertProps) {
+  // Estado para controlar a expansão do alerta quando o texto for longo
   const [isExpanded, setIsExpanded] = useState(false);
 
-  // Novo estado para controlar a visibilidade do botão
-  const [isExpandable, setIsExpandable] = useState(false); 
+  // Estado para controlar a visibilidade do botão (se o alerta é expandível)
+  const [isExpandable, setIsExpandable] = useState(false);
 
   // Referência para medir o tamanho do texto no navegador
   const textRef = useRef<HTMLSpanElement>(null);
@@ -16,43 +72,41 @@ export function InlineAlert({ error }: { error?: string | null }) {
 
   // Efeito de Foco e Scroll (Acessibilidade e UX)
   useEffect(() => {
-    if (error && containerRef.current) {
+    if (message && autoScroll && containerRef.current) {
       // O setTimeout garante que o navegador terminou o layout da tela antes do scroll
       const timer = setTimeout(() => {
         const container = containerRef.current;
         if (container) {
           container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-          container.focus({ preventScroll: true }); 
+          container.focus({ preventScroll: true });
         }
       }, 50);
 
       return () => clearTimeout(timer);
     }
-  }, [error]);
+  }, [message, autoScroll]);
 
   useEffect(() => {
-    if (!error || !textRef.current) return;
+    if (!message || !textRef.current) return;
 
     const checkOverflow = () => {
-      // O elemento <span> que contém o texto dentro do alerta.
-      const el = textRef.current;
-      if (!el) return;
+      // Elemento que contém o texto dentro do alerta
+      const element = textRef.current;
+      if (!element) return;
 
-      // 1. Se o texto tem quebra de linha explícita, sempre precisa do botão.
-      if (error.includes('\n')) {
+      if (message.includes('\n')) {
         setIsExpandable(true);
         return;
       }
 
-      // 2. Se o texto estiver recolhido (truncado), checamos se ele extrapolou a caixa.
-      // el.scrollWidth: Largura total real do texto invisível
-      // el.clientWidth: Largura da caixa disponível na tela
+      // Checamos se o texto extrapolou a caixa
+      // element.scrollWidth: largura do texto do alerta
+      // element.clientWidth: largura da caixa disponível
       if (!isExpanded) {
-        setIsExpandable(el.scrollWidth > el.clientWidth);
+        setIsExpandable(element.scrollWidth > element.clientWidth);
       }
     };
 
-    // Checa o tamanho na primeira renderização
     checkOverflow();
 
     // Cria um observador para reagir a mudanças de tamanho da tela (ex: virar o celular)
@@ -60,56 +114,84 @@ export function InlineAlert({ error }: { error?: string | null }) {
       checkOverflow();
     });
 
-    // Observa o container do texto
     if (textRef.current.parentElement) {
       resizeObserver.observe(textRef.current.parentElement);
     }
 
-    // Limpeza do observer quando o componente desmontar
     return () => resizeObserver.disconnect();
-  }, [error, isExpanded]); // Re-executa se o erro ou o estado de expansão mudarem
+  }, [message, isExpanded]);
 
-  // Se não houver erro, não renderiza nada na tela
-  if (!error) return null;
+  if (!message) return null;
+
+  const currentStyle = variantStyles[variant];
+
+  const defaultIcon = () => {
+    switch (variant) {
+      case 'success':
+        return <CheckIcon className={`h-4 w-4 shrink-0 mt-0.5 ${currentStyle.icon}`} />;
+      case 'warning':
+      case 'error':
+        return <TriangleAlertIcon className={`h-4 w-4 shrink-0 mt-0.5 ${currentStyle.icon}`} />;
+      case 'info':
+        return <InfoIcon className={`h-4 w-4 shrink-0 mt-0.5 ${currentStyle.icon}`} />;
+    }
+  };
 
   return (
-    <div 
+    <div
       ref={containerRef}
       tabIndex={-1}
-      role="alert"
-      aria-live="assertive"
-      className={`mb-4 text-sm text-red-600 bg-red-50 p-3 rounded-md flex justify-between gap-4 outline-none focus-visible:ring-1 focus-visible:ring-red-600 ${
+      role={variant === 'error' ? 'alert' : 'status'}
+      className={`mb-4 text-xs sm:text-sm p-3 rounded-lg flex justify-between gap-2.5 outline-none focus-visible:ring-1 ${currentStyle.container} ${
         isExpandable ? 'items-start' : 'items-center'
-      }`}
+      } ${className}`}
     >
-      <div className="flex flex-col min-w-0 w-full pt-0.5">
-        <span 
-          ref={textRef} // Conectamos a referência aqui
-          className={`font-normal transition-all duration-300 ${
-            isExpanded ? 'whitespace-pre-wrap break-words' : 'truncate'
-          }`}
-        >
-          {error}
-        </span>
+      <div className={`flex gap-2.5 min-w-0 w-full ${isExpanded ? 'items-start' : 'items-center'}`}>
+        {icon !== undefined ? icon : defaultIcon()}
+        <div className="flex flex-col min-w-0 w-full pt-0.5">
+          <span
+            ref={textRef}
+            className={`font-normal transition-all duration-300 leading-relaxed ${
+              isExpanded ? 'whitespace-pre-wrap break-words' : 'truncate'
+            }`}
+          >
+            {message}
+          </span>
+        </div>
       </div>
 
-      {/* Renderiza o botão SOMENTE se o texto for muito grande para a tela ou tiver '\n' */}
-      {isExpandable && (
-        <button 
-          type="button"
-          onClick={() => setIsExpanded(!isExpanded)}
-          aria-expanded={isExpanded}
-          aria-label={isExpanded ? "Recolher mensagem de erro" : "Expandir mensagem de erro"}
-          title={isExpanded ? "Recolher mensagem de erro" : "Expandir mensagem de erro"}
-          className="shrink-0 text-red-600 p-1 rounded-full transition-colors duration-200 hover:bg-red-100 outline-none focus-visible:ring-1 focus-visible:ring-red-600"
-        >
-          <LuChevronDown 
-            className={`h-5 w-5 transform transition-transform duration-300 ${
-              isExpanded ? 'rotate-180' : 'rotate-0'
-            }`}
-          />
-        </button>
-      )}
+      <div className="flex items-center gap-1 shrink-0 ml-2">
+        {/* Botão de expansão do texto truncado */}
+        {isExpandable && (
+          <button
+            type="button"
+            onClick={() => setIsExpanded(!isExpanded)}
+            aria-expanded={isExpanded}
+            aria-label={isExpanded ? 'Recolher mensagem' : 'Expandir mensagem'}
+            title={isExpanded ? 'Recolher mensagem' : 'Expandir mensagem'}
+            className={`p-1 rounded-full transition-colors duration-200 outline-none focus-visible:ring-1 ${currentStyle.button}`}
+          >
+            <ChevronDownIcon
+              className={`h-4 w-4 transform transition-transform duration-300 ${
+                isExpanded ? 'rotate-180' : 'rotate-0'
+              }`}
+            />
+          </button>
+        )}
+
+        {/* Botão opcional de dispensar */}
+        {onDismiss && (
+          <button
+            type="button"
+            onClick={onDismiss}
+            aria-label="Dispensar aviso"
+            title="Dispensar aviso"
+            className={`p-1 rounded-full text-xs font-bold transition-colors duration-200 outline-none focus-visible:ring-1 ${currentStyle.button}`}
+          >
+            <CloseIcon className="h-4 w-4 shrink-0" />
+          </button>
+        )}
+      </div>
     </div>
   );
 }

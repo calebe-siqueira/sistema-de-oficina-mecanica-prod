@@ -19,6 +19,9 @@ import com.carbulab.dto.ordem_servico.CreateOsDTO;
 import com.carbulab.dto.ordem_servico.ResponseOsDTO;
 import com.carbulab.dto.ordem_servico.UpdateOsDTO;
 import com.carbulab.dto.ordem_servico.UpdateOsDTO.ItemUpdateDTO;
+import com.carbulab.dto.ordem_servico.SearchOsDTO;
+import com.carbulab.specifications.OrdemServicoSpecification;
+import com.carbulab.utils.ConsultaPorPlaca;
 import com.carbulab.exception.BusinessValidationException;
 import com.carbulab.exception.ResourceNotFoundException;
 import com.carbulab.repositories.OrdemServicoRepository;
@@ -32,6 +35,9 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
+
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 @Service
 @RequiredArgsConstructor
@@ -82,9 +88,8 @@ public class OrdemServicoService {
         }
     }
 
-    public List<ResponseOsDTO> listarLixeira() {
-        return repository.findAllDeleted()
-                .stream()
+    public Page<ResponseOsDTO> listarLixeira(Pageable pageable) {
+        return repository.findAllDeleted(pageable)
                 .map(os -> {
                     ResponseOsDTO dto = new ResponseOsDTO(os, calcularValorTotal(os));
                     if (os.getVeiculo() == null) {
@@ -113,22 +118,23 @@ public class OrdemServicoService {
                         } catch (Exception e) {}
                     }
                     return dto;
-                })
-                .toList();
+                });
     }
 
     // ==============================================================
 
-    public List<ResponseOsDTO> listarTodos(Integer status) {
+    public Page<ResponseOsDTO> listarTodos(Integer status, Pageable pageable) {
         if (status != null) {
-            return repository.findByStatusAtivas(status).stream()
-                    .map(os -> new ResponseOsDTO(os, calcularValorTotal(os)))
-                    .toList();
+            return repository.findByStatusAtivas(status, pageable)
+                    .map(os -> new ResponseOsDTO(os, calcularValorTotal(os)));
         }
-        return repository.findAllAtivas()
-                .stream()
-                .map(os -> new ResponseOsDTO(os, calcularValorTotal(os)))
-                .toList();
+        return repository.findAllAtivas(pageable)
+                .map(os -> new ResponseOsDTO(os, calcularValorTotal(os)));
+    }
+
+    public Page<ResponseOsDTO> buscar(SearchOsDTO search, Pageable pageable) {
+        return repository.findAll(OrdemServicoSpecification.dinamico(search.clienteId(), search.tipo(), search.termo(), search.dataInicio(), search.dataFim(), search.status()), pageable)
+                .map(os -> new ResponseOsDTO(os, calcularValorTotal(os)));
     }
 
     public ResponseOsDTO buscarPorId(Integer codOs) {
@@ -176,57 +182,17 @@ public class OrdemServicoService {
             os.setValorPago(dto.valorPago());
         os.setVeiculo(veiculo);
 
-        if (dto.pecas() != null) {
-            for (CreateOsDTO.ItemDTO item : dto.pecas()) {
-                Peca peca = null;
-                if (item.codItem() != null) {
-                    peca = pecaRepository.findById(item.codItem()).orElse(null);
-                }
-                if (peca == null && item.nomeItem() != null && !item.nomeItem().trim().isEmpty()) {
-                    peca = pecaRepository.findByNomePeca(item.nomeItem())
-                            .orElseGet(() -> {
-                                Peca nova = new Peca();
-                                nova.setNomePeca(item.nomeItem());
-                                return pecaRepository.save(nova);
-                            });
-                }
-                if (peca == null) {
-                    throw new ResourceNotFoundException("Peça inválida ou não informada.");
-                }
+		if (dto.pecas() != null) {
+			for (CreateOsDTO.ItemDTO item : dto.pecas()) {
+				adicionarPecaItem(os, item.codItem(), item.nomeItem(), item.quantidade(), item.valorUnitario());
+			}
+		}
 
-                OsPeca osPeca = new OsPeca();
-                osPeca.setPeca(peca);
-                osPeca.setQuantidade(item.quantidade());
-                osPeca.setValorUnitario(item.valorUnitario());
-                os.adicionarPeca(osPeca);
-            }
-        }
-
-        if (dto.servicos() != null) {
-            for (CreateOsDTO.ItemDTO item : dto.servicos()) {
-                Servico servico = null;
-                if (item.codItem() != null) {
-                    servico = servicoRepository.findById(item.codItem()).orElse(null);
-                }
-                if (servico == null && item.nomeItem() != null && !item.nomeItem().trim().isEmpty()) {
-                    servico = servicoRepository.findByNomeServico(item.nomeItem())
-                            .orElseGet(() -> {
-                                Servico novo = new Servico();
-                                novo.setNomeServico(item.nomeItem());
-                                return servicoRepository.save(novo);
-                            });
-                }
-                if (servico == null) {
-                    throw new ResourceNotFoundException("Serviço inválido ou não informado.");
-                }
-
-                OsServico osServico = new OsServico();
-                osServico.setServico(servico);
-                osServico.setQuantidade(item.quantidade());
-                osServico.setValorUnitario(item.valorUnitario());
-                os.adicionarServico(osServico);
-            }
-        }
+		if (dto.servicos() != null) {
+			for (CreateOsDTO.ItemDTO item : dto.servicos()) {
+				adicionarServicoItem(os, item.codItem(), item.nomeItem(), item.quantidade(), item.valorUnitario());
+			}
+		}
 
         OrdemServico salvo = repository.save(os);
         return new ResponseOsDTO(salvo, calcularValorTotal(salvo));
@@ -247,6 +213,21 @@ public class OrdemServicoService {
                 .toList();
     }
 
+    public Page<ResponseOsDTO> listarOsPorClientePaginado(Long clienteId, Pageable pageable) {
+        return repository.findByClienteIdAtivasPaged(clienteId, pageable)
+                .map(os -> new ResponseOsDTO(os, calcularValorTotal(os)));
+    }
+
+    public Page<ResponseOsDTO> listarOsPorClienteEPlacaPaginado(Long clienteId, String placa, Pageable pageable) {
+        var termos = ConsultaPorPlaca.obterTermosConsulta(placa);
+        if (termos.termo1().isBlank()) {
+            return listarOsPorClientePaginado(clienteId, pageable);
+        }
+
+        return repository.findByClienteIdAndVeiculoPlacaLikeAtivasPaged(clienteId, termos.termo1(), termos.termo2(), pageable)
+                .map(os -> new ResponseOsDTO(os, calcularValorTotal(os)));
+    }
+
     public List<ResponseOsDTO> listarOsPorVeiculo(Integer veiculoId) {
         return repository.findByVeiculoIdAtivas(veiculoId)
                 .stream()
@@ -258,84 +239,117 @@ public class OrdemServicoService {
         return repository.countByVeiculoIdAtivas(veiculoId);
     }
 
-    @Transactional
-    public ResponseOsDTO atualizarOs(Integer codOs, UpdateOsDTO dto) {
-        OrdemServico os = repository.findById(codOs)
-                .orElseThrow(() -> new ResourceNotFoundException("Ordem de Serviço não encontrada com ID: " + codOs));
+	@Transactional
+	public ResponseOsDTO atualizarOs(Integer codOs, UpdateOsDTO dto) {
+		OrdemServico os = repository.findById(codOs)
+				.orElseThrow(() -> new ResourceNotFoundException("Ordem de Serviço não encontrada com ID: " + codOs));
 
-        if (dto.dataOs() != null)
-            os.setDataOs(dto.dataOs());
-        if (dto.quilometragem() != null)
-            os.setQuilometragem(dto.quilometragem());
-        if (dto.descricao() != null)
-            os.setDescricao(dto.descricao());
-        if (dto.tipoDesconto() != null)
-            os.setTipoDesconto(dto.tipoDesconto());
-        if (dto.desconto() != null)
-            os.setDesconto(dto.desconto());
-        if (dto.statusServico() != null)
-            os.setStatusServico(dto.statusServico());
-        if (dto.valorPago() != null)
-            os.setValorPago(dto.valorPago());
+		if (dto.dataOs().isPresent()) {
+			if (dto.dataOs().get() == null) {
+				throw new BusinessValidationException("Data da OS é obrigatória.");
+			}
+			os.setDataOs(dto.dataOs().get());
+		}
 
-        // Limpa os itens antigos (graças ao orphanRemoval = true, eles serão deletados)
-        if (dto.pecas() != null) {
-            os.getPecas().clear();
-            for (ItemUpdateDTO item : dto.pecas()) {
-                Peca peca = null;
-                if (item.codItem() != null) {
-                    peca = pecaRepository.findById(item.codItem()).orElse(null);
-                }
-                if (peca == null && item.nomeItem() != null && !item.nomeItem().trim().isEmpty()) {
-                    peca = pecaRepository.findByNomePeca(item.nomeItem())
-                            .orElseGet(() -> {
-                                Peca nova = new Peca();
-                                nova.setNomePeca(item.nomeItem());
-                                return pecaRepository.save(nova);
-                            });
-                }
-                if (peca == null) {
-                    throw new ResourceNotFoundException("Peça inválida ou não informada.");
-                }
+		dto.quilometragem().ifPresent(os::setQuilometragem);
+		dto.descricao().ifPresent(os::setDescricao);
 
-                OsPeca osPeca = new OsPeca();
-                osPeca.setPeca(peca);
-                osPeca.setQuantidade(item.quantidade());
-                osPeca.setValorUnitario(item.valorUnitario());
-                os.adicionarPeca(osPeca);
-            }
-        }
+		if (dto.tipoDesconto().isPresent()) {
+			String tipoDesconto = dto.tipoDesconto().get();
+			if (tipoDesconto == null || tipoDesconto.isBlank()) {
+				os.setTipoDesconto("N");
+			} else {
+				String normalizado = tipoDesconto.trim().toUpperCase();
+				if (!List.of("N", "P", "V").contains(normalizado)) {
+					throw new BusinessValidationException("Tipo de desconto inválido. Valores permitidos: 'N', 'P' ou 'V'.");
+				}
+				os.setTipoDesconto(normalizado);
+			}
+		}
 
-        if (dto.servicos() != null) {
-            os.getServicos().clear();
-            for (ItemUpdateDTO item : dto.servicos()) {
-                Servico servico = null;
-                if (item.codItem() != null) {
-                    servico = servicoRepository.findById(item.codItem()).orElse(null);
-                }
-                if (servico == null && item.nomeItem() != null && !item.nomeItem().trim().isEmpty()) {
-                    servico = servicoRepository.findByNomeServico(item.nomeItem())
-                            .orElseGet(() -> {
-                                Servico novo = new Servico();
-                                novo.setNomeServico(item.nomeItem());
-                                return servicoRepository.save(novo);
-                            });
-                }
-                if (servico == null) {
-                    throw new ResourceNotFoundException("Serviço inválido ou não informado.");
-                }
+		dto.desconto().ifPresent(os::setDesconto);
 
-                OsServico osServico = new OsServico();
-                osServico.setServico(servico);
-                osServico.setQuantidade(item.quantidade());
-                osServico.setValorUnitario(item.valorUnitario());
-                os.adicionarServico(osServico);
-            }
-        }
+		if (dto.statusServico().isPresent()) {
+			if (dto.statusServico().get() == null) {
+				throw new BusinessValidationException("Status da OS é obrigatório.");
+			}
+			os.setStatusServico(dto.statusServico().get());
+		}
 
-        OrdemServico salvo = repository.save(os);
-        return new ResponseOsDTO(salvo, calcularValorTotal(salvo));
-    }
+		dto.valorPago().ifPresent(os::setValorPago);
+
+		// Limpa os itens antigos (graças ao orphanRemoval = true, eles serão deletados)
+		if (dto.pecas().isPresent()) {
+			os.getPecas().clear();
+			List<ItemUpdateDTO> pecas = dto.pecas().get();
+			if (pecas != null) {
+				for (ItemUpdateDTO item : pecas) {
+					adicionarPecaItem(os, item.codItem(), item.nomeItem(), item.quantidade(), item.valorUnitario());
+				}
+			}
+		}
+
+		if (dto.servicos().isPresent()) {
+			os.getServicos().clear();
+			List<ItemUpdateDTO> servicos = dto.servicos().get();
+			if (servicos != null) {
+				for (ItemUpdateDTO item : servicos) {
+					adicionarServicoItem(os, item.codItem(), item.nomeItem(), item.quantidade(), item.valorUnitario());
+				}
+			}
+		}
+
+		OrdemServico salvo = repository.save(os);
+		return new ResponseOsDTO(salvo, calcularValorTotal(salvo));
+	}
+
+	private void adicionarPecaItem(OrdemServico os, Integer codItem, String nomeItem, Integer quantidade, BigDecimal valorUnitario) {
+		Peca peca = null;
+		if (codItem != null) {
+			peca = pecaRepository.findById(codItem).orElse(null);
+		}
+		if (peca == null && nomeItem != null && !nomeItem.trim().isEmpty()) {
+			peca = pecaRepository.findByNomePeca(nomeItem)
+					.orElseGet(() -> {
+						Peca nova = new Peca();
+						nova.setNomePeca(nomeItem);
+						return pecaRepository.save(nova);
+					});
+		}
+		if (peca == null) {
+			throw new ResourceNotFoundException("Peça inválida ou não informada.");
+		}
+
+		OsPeca osPeca = new OsPeca();
+		osPeca.setPeca(peca);
+		osPeca.setQuantidade(quantidade);
+		osPeca.setValorUnitario(valorUnitario);
+		os.adicionarPeca(osPeca);
+	}
+
+	private void adicionarServicoItem(OrdemServico os, Integer codItem, String nomeItem, Integer quantidade, BigDecimal valorUnitario) {
+		Servico servico = null;
+		if (codItem != null) {
+			servico = servicoRepository.findById(codItem).orElse(null);
+		}
+		if (servico == null && nomeItem != null && !nomeItem.trim().isEmpty()) {
+			servico = servicoRepository.findByNomeServico(nomeItem)
+					.orElseGet(() -> {
+						Servico novo = new Servico();
+						novo.setNomeServico(nomeItem);
+						return servicoRepository.save(novo);
+					});
+		}
+		if (servico == null) {
+			throw new ResourceNotFoundException("Serviço inválido ou não informado.");
+		}
+
+		OsServico osServico = new OsServico();
+		osServico.setServico(servico);
+		osServico.setQuantidade(quantidade);
+		osServico.setValorUnitario(valorUnitario);
+		os.adicionarServico(osServico);
+	}
 
     public byte[] gerarPdfOs(Integer codOs) {
         OrdemServico os = repository.findById(codOs)

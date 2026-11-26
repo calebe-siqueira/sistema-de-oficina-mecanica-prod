@@ -1,7 +1,7 @@
 // --> Utilitários de aplicação de MÁSCARA
 
 export const maskCep = (v: string | number | null | undefined): string => {
-    if (v === null || v === undefined || v === '') return '';
+    if (v == null || v === '') return '';
 
     // Remove caracteres não numéricos e limita a string a 8 dígitos
     let val = String(v).replace(/\D/g, '').slice(0, 8);
@@ -13,7 +13,7 @@ export const maskCep = (v: string | number | null | undefined): string => {
 };
 
 export const maskCnpj = (v: string | number | null | undefined): string => {
-    if (v === null || v === undefined || v === '') return '';
+    if (v == null || v === '') return '';
 
     // Remove caracteres não alfanuméricos
     let val = String(v).toUpperCase().replace(/[^A-Z\d]/g, '');
@@ -35,7 +35,7 @@ export const maskCnpj = (v: string | number | null | undefined): string => {
 };
 
 export const maskCpf = (v: string | number | null | undefined): string => {
-    if (v === null || v === undefined || v === '') return '';
+    if (v == null || v === '') return '';
 
     // Remove caracteres não numéricos e limita a string a 11 dígitos
     const val = String(v).replace(/\D/g, '').slice(0, 11);
@@ -47,6 +47,22 @@ export const maskCpf = (v: string | number | null | undefined): string => {
         .replace(/^(\d{3})(\d)/, '$1.$2')
         .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
         .replace(/^(\d{3})\.(\d{3})\.(\d{3})(\d)/, '$1.$2.$3-$4');
+};
+
+export const maskCpfCnpj = (
+    v: string | number | null | undefined,
+    tipo?: string | null | undefined
+): string => {
+    if (v == null || v === '') return '';
+
+    if (tipo === 'F') return maskCpf(v);
+    if (tipo === 'J') return maskCnpj(v);
+
+    // Fallback automático (caso tipo não seja informado):
+    const clean = String(v).toUpperCase().replace(/[^A-Z\d]/g, '');
+    const hasLetters = /[A-Z]/.test(clean);
+
+    return hasLetters || clean.length > 11 ? maskCnpj(v) : maskCpf(v);
 };
 
 export const maskPhone = (v: string | number | null | undefined): string => {
@@ -96,4 +112,43 @@ export const maskPlaca = (v: string | null | undefined): string => {
     }
 
     return formatted;
+};
+
+// Formatador instanciado fora da função faz com que o objeto seja criado na memória apenas uma vez
+const brlFormatter = new Intl.NumberFormat('pt-BR', {
+  style: 'currency',
+  currency: 'BRL',
+});
+
+/**
+ * Formata valores numéricos (para labels) ou strings (para inputs) no padrão de moeda Real (BRL).
+ */
+export const formatCurrency = (value: string | number): string => {
+  if (value == null || value === '') return 'R$ 0,00';
+
+  let digits = '';
+
+  if (typeof value === 'number') {
+    digits = value.toFixed(2).replace(/\D/g, '');
+  } else {
+    digits = value.replace(/\D/g, '');
+  }
+
+  if (!digits && typeof value === 'string') return '';
+  if (!digits) return 'R$ 0,00';
+
+  const numericValue = Number(digits) / 100;
+
+  return brlFormatter.format(numericValue);
+};
+
+/**
+ * Remove a máscara de moeda, transformando a string visual de volta em um float puro.
+ * Ideal para ser usada antes de enviar o dado para a API ou salvar no banco.
+ */
+export const parseCurrencyToNumber = (value: string): number => {
+  if (!value) return 0;
+  const digits = value.replace(/\D/g, '');
+  if (!digits) return 0;
+  return Number(digits) / 100;
 };
