@@ -1,5 +1,5 @@
 import React, { ChangeEvent } from 'react';
-import { LuTrash2 } from '../components/ui/Icons';
+import { CircleMinusIcon } from '../components/ui/Icons';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import { toastify } from '../components/modules/SystemMessages';
@@ -94,8 +94,8 @@ const OSItemsList = ({
         <thead>
           <tr className="text-xs uppercase text-gray-500 tracking-wider">
             <th className="w-full text-left pb-2 font-semibold">Item</th>
-            <th className="min-w-16 lg:min-w-32 pb-2 font-semibold text-center">Qtd</th>
-            <th className="min-w-20 lg:min-w-40 pb-2 font-semibold text-center">Valor (R$)</th>
+            <th className="min-w-16 lg:min-w-32 pb-2 text-left pl-1 font-semibold">Qtd</th>
+            <th className="min-w-20 lg:min-w-40 pb-2 text-left pl-1 font-semibold">Valor</th>
             <th className="w-12 pb-2"></th>
           </tr>
         </thead>
@@ -130,12 +130,13 @@ const OSItemsList = ({
                   type="number"
                   name="valor"
                   min="0"
-                  max="9999999"
-                  step="0.1"
+                  max="999999"
+                  step="0.01"
                   value={item.valor}
                   onChange={(e) => onItemChange(item.originalIndex, e)}
                   onKeyDown={(e) => handleKeyDown(e, localIndex)}
                   className="text-right"
+                  prefix='R$'
                 />
               </td>
               <td className="py-1 pl-2 pr-0.5 text-right">
@@ -146,7 +147,7 @@ const OSItemsList = ({
                   onClick={() => onRemoveItem(item.originalIndex)}
                   className="h-[38px] text-red-500 hover:text-red-700 p-2"
                 >
-                  <LuTrash2 className="h-4 w-4" />
+                  <CircleMinusIcon className="h-4 w-4" />
                 </Button>
               </td>
             </tr>
@@ -158,25 +159,3 @@ const OSItemsList = ({
 };
 
 export default OSItemsList;
-
-
-
-// const OSItemsList = ({ items, type, onItemChange, onRemoveItem }) => {
-//   const itemsToRender = items.map((item, index) => ({ ...item, originalIndex: index })).filter(item => item.tipo === type);
-//   if (itemsToRender.length === 0) return <p className="text-gray-500 py-2 text-center">Nenhum item.</p>;
-//   return (
-//     <table className="min-w-full">
-//         <thead><tr><th className="text-left">Item</th><th className="w-24">Qtd</th><th className="w-32">Valor</th><th className="w-16"></th></tr></thead>
-//         <tbody>
-//             {itemsToRender.map((item) => (
-//                 <tr key={item.originalIndex}>
-//                     <td className="p-1"><Input name="nome_item" value={item.nome_item} onChange={(e) => onItemChange(item.originalIndex, e)} /></td>
-//                     <td className="p-1"><Input type="number" name="quantidade" value={item.quantidade} onChange={(e) => onItemChange(item.originalIndex, e)} /></td>
-//                     <td className="p-1"><Input type="number" step="0.01" name="valor" value={item.valor} onChange={(e) => onItemChange(item.originalIndex, e)} /></td>
-//                     <td className="p-1"><Button type="button" variant="ghost" onClick={() => onRemoveItem(item.originalIndex)} className="text-red-500"><Trash2 className="h-4 w-4"/></Button></td>
-//                 </tr>
-//             ))}
-//         </tbody>
-//     </table>
-//   );
-// };

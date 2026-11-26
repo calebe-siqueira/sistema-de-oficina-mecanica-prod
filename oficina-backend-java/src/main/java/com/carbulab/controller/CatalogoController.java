@@ -2,6 +2,7 @@ package com.carbulab.controller;
 
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -26,21 +27,25 @@ public class CatalogoController {
     }
     
     @GetMapping("/montadoras")
+	@PreAuthorize("hasAnyRole('ADMIN', 'MECANICO')")
     public ResponseEntity<List<Montadora>> listarMontadoras() {
         return ResponseEntity.ok(catalogoService.listarMontadoras());
     }
     
     @GetMapping("/montadoras/{id_montadora}/modelos")
+	@PreAuthorize("hasAnyRole('ADMIN', 'MECANICO')")
     public ResponseEntity<List<Modelo>> listarModelosPorMontadora(@PathVariable Integer id_montadora) {
         return ResponseEntity.ok(catalogoService.listarModelosPorMontadora(id_montadora));
     }
 
     @GetMapping("/pecas")
+	@PreAuthorize("hasAnyRole('ADMIN', 'MECANICO')")
     public ResponseEntity<List<Peca>> listarPecas() {
         return ResponseEntity.ok(catalogoService.listarPecas());
     }
 
     @GetMapping("/servicos")
+	@PreAuthorize("hasAnyRole('ADMIN', 'MECANICO')")
     public ResponseEntity<List<Servico>> listarServicos() {
         return ResponseEntity.ok(catalogoService.listarServicos());
     }
@@ -48,12 +53,14 @@ public class CatalogoController {
     // ======================== DELETE (PERMANENTE) ==========================
 
     @DeleteMapping("/pecas/{id}")
+	@PreAuthorize("hasAnyRole('ADMIN')")
     public ResponseEntity<Void> deletarPeca(@PathVariable Integer id) {
         catalogoService.deletarPecaPermanentemente(id);
         return ResponseEntity.noContent().build();
     }
 
     @DeleteMapping("/servicos/{id}")
+	@PreAuthorize("hasAnyRole('ADMIN')")
     public ResponseEntity<Void> deletarServico(@PathVariable Integer id) {
         catalogoService.deletarServicoPermanentemente(id);
         return ResponseEntity.noContent().build();

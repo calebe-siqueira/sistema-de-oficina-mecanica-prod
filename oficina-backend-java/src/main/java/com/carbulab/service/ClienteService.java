@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import com.carbulab.domain.Pessoa;
 import com.carbulab.domain.cliente.Cep;
 import com.carbulab.domain.cliente.Cliente;
 import com.carbulab.domain.cliente.Endereco;
@@ -12,15 +13,20 @@ import com.carbulab.domain.cliente.Endereco;
 import com.carbulab.dto.cliente.CreateClienteDTO;
 import com.carbulab.dto.cliente.ResponseClienteDTO;
 import com.carbulab.dto.cliente.ResponseEnderecoDTO;
+import com.carbulab.dto.cliente.ResponseMeuPerfilDTO;
 import com.carbulab.dto.cliente.SearchClienteDTO;
 import com.carbulab.dto.cliente.UpdateClienteDTO;
 import com.carbulab.dto.cliente.CreateClienteDTO.EnderecoDTO;
+import com.carbulab.dto.common.PatchField;
 import com.carbulab.dto.veiculo.ResponseVeiculoDTO;
 import com.carbulab.utils.ConsultaPorPlaca;
 import com.carbulab.exception.ResourceNotFoundException;
+import com.carbulab.repositories.CepRepository;
 import com.carbulab.repositories.ClienteQueryRepository;
 import com.carbulab.repositories.ClienteRepository;
 import com.carbulab.repositories.OrdemServicoRepository;
+import com.carbulab.repositories.PessoaRepository;
+import com.carbulab.repositories.UsuarioRepository;
 import com.carbulab.repositories.VeiculoRepository;
 import com.carbulab.exception.BusinessValidationException;
 import com.carbulab.exception.DuplicateResourceException;
@@ -28,6 +34,9 @@ import com.carbulab.exception.DuplicateResourceException;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.*;
+
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 /**
  * Service para CLIENTE
@@ -47,17 +56,26 @@ public class ClienteService {
 	private final JdbcTemplate jdbcTemplate;
 	private final VeiculoRepository veiculoRepository;
 	private final OrdemServicoRepository ordemServicoRepository;
+	private final PessoaRepository pessoaRepository;
+	private final UsuarioRepository usuarioRepository;
+	private final CepRepository cepRepository;
 
 	public ClienteService(ClienteRepository repository,
 						  ClienteQueryRepository queryRepository,
 						  JdbcTemplate jdbcTemplate,
 						  VeiculoRepository veiculoRepository,
-						  OrdemServicoRepository ordemServicoRepository) {
+						  OrdemServicoRepository ordemServicoRepository,
+						  PessoaRepository pessoaRepository,
+						  UsuarioRepository usuarioRepository,
+						  CepRepository cepRepository) {
 		this.repository = repository;
 		this.queryRepository = queryRepository;
 		this.jdbcTemplate = jdbcTemplate;
 		this.veiculoRepository = veiculoRepository;
 		this.ordemServicoRepository = ordemServicoRepository;
+		this.pessoaRepository = pessoaRepository;
+		this.usuarioRepository = usuarioRepository;
+		this.cepRepository = cepRepository;
 	}
 
 	// ===================== RESTORE (LIXEIRA) =======================
@@ -76,25 +94,60 @@ public class ClienteService {
 		ordemServicoRepository.restoreByClienteId(id, deletedAt);
 		ordemServicoRepository.restorePecasByClienteId(id, deletedAt);
 		ordemServicoRepository.restoreServicosByClienteId(id, deletedAt);
+
+		// Restaura tb_usuario vinculado ao cliente (se foi excluído junto com o cliente)
+		String sqlRestoreUsuario = "UPDATE tb_usuario SET deleted_at = NULL WHERE (fk_cod_cliente = ? OR (fk_cod_pessoa = (SELECT fk_cod_pessoa FROM tb_cliente WHERE cod_cliente = ?) AND funcao = 'CLIENTE')) AND deleted_at IS NOT NULL AND ABS(TIMESTAMPDIFF(SECOND, deleted_at, ?)) <= 5";
+		jdbcTemplate.update(sqlRestoreUsuario, id, id, Timestamp.valueOf(deletedAt));
+
+		// Restaura tb_pessoa vinculada ao cliente (se foi excluída junto com o cliente)
+		String sqlRestorePessoa = "UPDATE tb_pessoa SET deleted_at = NULL WHERE cod_pessoa = (SELECT fk_cod_pessoa FROM tb_cliente WHERE cod_cliente = ?) AND deleted_at IS NOT NULL AND ABS(TIMESTAMPDIFF(SECOND, deleted_at, ?)) <= 5";
+		jdbcTemplate.update(sqlRestorePessoa, id, Timestamp.valueOf(deletedAt));
 	}
 
 	@Transactional
 	public void deletarPermanentemente(Long id) {
 		try {
+			// Remove usuário vinculado na lixeira antes de excluir o cliente, evitando restrição de FK
+			String sqlDeleteUsuario = "DELETE FROM tb_usuario WHERE (fk_cod_cliente = ? OR (fk_cod_pessoa = (SELECT fk_cod_pessoa FROM tb_cliente WHERE cod_cliente = ?) AND funcao = 'CLIENTE')) AND deleted_at IS NOT NULL";
+			jdbcTemplate.update(sqlDeleteUsuario, id, id);
+
+			Long codPessoa = null;
+			Long codEndereco = null;
+			try {
+				codPessoa = jdbcTemplate.queryForObject("SELECT fk_cod_pessoa FROM tb_cliente WHERE cod_cliente = ?", Long.class, id);
+				codEndereco = jdbcTemplate.queryForObject("SELECT fk_cod_endereco FROM tb_cliente WHERE cod_cliente = ?", Long.class, id);
+			} catch (Exception ignored) {}
+
 			int rows = repository.deletarPermanentemente(id);
 			if (rows == 0) {
 				throw new ResourceNotFoundException("Cliente não encontrado na lixeira para exclusão permanente.");
+			}
+
+			// Se a pessoa na lixeira não estiver vinculada a mais nenhum outro cliente ou usuário, remove permanentemente
+			if (codPessoa != null) {
+				String sqlCheckPessoa = "SELECT COUNT(*) FROM (SELECT fk_cod_pessoa FROM tb_cliente WHERE fk_cod_pessoa = ? UNION ALL SELECT fk_cod_pessoa FROM tb_usuario WHERE fk_cod_pessoa = ?) AS t";
+				Integer countPessoa = jdbcTemplate.queryForObject(sqlCheckPessoa, Integer.class, codPessoa, codPessoa);
+				if (countPessoa != null && countPessoa == 0) {
+					jdbcTemplate.update("DELETE FROM tb_pessoa WHERE cod_pessoa = ? AND deleted_at IS NOT NULL", codPessoa);
+				}
+			}
+
+			// Se o endereço na lixeira não estiver vinculado a outro cliente, remove permanentemente
+			if (codEndereco != null) {
+				String sqlCheckEndereco = "SELECT COUNT(*) FROM tb_cliente WHERE fk_cod_endereco = ?";
+				Integer countEndereco = jdbcTemplate.queryForObject(sqlCheckEndereco, Integer.class, codEndereco);
+				if (countEndereco != null && countEndereco == 0) {
+					jdbcTemplate.update("DELETE FROM tb_endereco WHERE cod_endereco = ? AND deleted_at IS NOT NULL", codEndereco);
+				}
 			}
 		} catch (DataIntegrityViolationException e) {
 			throw new BusinessValidationException("Não é possível excluir permanentemente este cliente, pois ele possui vínculos com outros dados do sistema.");
 		}
 	}
 
-	public List<ResponseClienteDTO> listarLixeira() {
-		return repository.findAllDeleted()
-				.stream()
-				.map(ResponseClienteDTO::new)
-				.toList();
+	public Page<ResponseClienteDTO> listarLixeira(Pageable pageable) {
+		return repository.findAllDeleted(pageable)
+				.map(ResponseClienteDTO::new);
 	}
 
 	// ===================== LISTAR =======================
@@ -102,11 +155,9 @@ public class ClienteService {
 	/**
 	 * Buscar todos os clientes
 	 */
-	public List<ResponseClienteDTO> listarTodos() {
-		return repository.findAll()
-				.stream()
-				.map(ResponseClienteDTO::new)
-				.toList();
+	public Page<ResponseClienteDTO> listarTodos(Pageable pageable) {
+		return repository.findAll(pageable)
+				.map(ResponseClienteDTO::new);
 	}
 
 	// ===================== BUSCAR =======================
@@ -146,12 +197,27 @@ public class ClienteService {
 	}
 
 	/**
+	 * Buscar dados do perfil do cliente (dados cadastrais + endereço, sem veículos)
+	 */
+	public ResponseMeuPerfilDTO buscarMeuPerfil(Long id) {
+		Cliente cliente = repository.findById(id)
+				.orElseThrow(() -> new ResourceNotFoundException("Cliente não encontrado com ID: " + id));
+
+		ResponseEnderecoDTO endereco = null;
+		if (cliente.getFk_cod_endereco() != null) {
+			endereco = carregarEnderecoDTO(cliente.getFk_cod_endereco());
+		}
+
+		return new ResponseMeuPerfilDTO(cliente, endereco);
+	}
+
+	/**
 	 * Busca com filtros dinâmicos
 	 * Tipos suportados: "nome", "cpf_cnpj", "telefone", "placa"
 	 */
-	public List<Map<String, Object>> buscar(SearchClienteDTO search) {
+	public Page<Map<String, Object>> buscar(SearchClienteDTO search, Pageable pageable) {
 		if (search.termo() == null || search.termo().isBlank()) {
-			return List.of();
+			return Page.empty();
 		}
 
 		String termo = search.termo().replaceAll("[^a-zA-Z0-9]", "").toUpperCase();
@@ -160,16 +226,23 @@ public class ClienteService {
 			// Utiliza o repositório de queries customizadas para buscas complexas (uma vez
 			// que as buscas por nome, CPF/CNPJ, telefone e placa exigem manipulações
 			// específicas, que não são geradas automaticamente pelo Spring Data JPA)
-			case "nome" -> queryRepository.buscarPorNome(search.termo());
-			case "cpf_cnpj" -> queryRepository.buscarPorCpfCnpj(termo);
-			case "telefone" -> queryRepository.buscarPorTelefone(termo);
-			case "placa" -> {
-				String placaFormatada = adaptarPlacaMercosul(termo);
-				List<Map<String, Object>> resultado = queryRepository.buscarPorPlaca("%" + termo + "%");
-				if (resultado.isEmpty() && (placaFormatada != null ? !placaFormatada.equals(termo) : false)) {
-					resultado = queryRepository.buscarPorPlaca("%" + placaFormatada + "%");
+			case "cod_cliente" -> {
+				try {
+					yield queryRepository.buscarPorId(Long.parseLong(termo), pageable);
+				} catch (NumberFormatException e) {
+					yield Page.empty();
 				}
-				yield resultado;
+			}
+			case "nome" -> queryRepository.buscarPorNome(search.termo(), pageable);
+			case "cpf_cnpj" -> queryRepository.buscarPorCpfCnpj(termo, pageable);
+			case "telefone" -> queryRepository.buscarPorTelefone(termo, pageable);
+			case "placa" -> {
+				var termos = ConsultaPorPlaca.obterTermosConsulta(termo);
+				Page<Map<String, Object>> resultado = queryRepository.buscarPorPlaca("%" + termos.termo1() + "%", pageable);
+				if ((resultado == null || resultado.isEmpty()) && termos.possuiConversao()) {
+					resultado = queryRepository.buscarPorPlaca("%" + termos.termo2() + "%", pageable);
+				}
+				yield resultado != null ? resultado : Page.empty();
 			}
 			default -> throw new BusinessValidationException("Tipo de busca inválido: " + search.tipo());
 		};
@@ -185,22 +258,12 @@ public class ClienteService {
 		// Valida os dados do cliente:
 		validarDadosCliente(dto);
 
-		if (dto.cpf_cnpj() != null && !dto.cpf_cnpj().isBlank()) {
-			String cpfCnpjClean = dto.cpf_cnpj().replaceAll("[^0-9]", "");
-
-			Optional<Cliente> clienteCpfCnpjJaCadastrado = queryRepository.findByCpfCnpjClean(cpfCnpjClean);
-			// Verifica se o CPF já existe no banco de dados
-			if (clienteCpfCnpjJaCadastrado.isPresent()) {
-				throw new DuplicateResourceException(
-						String.format("Já existe um cliente cadastrado com esse CPF/CNPJ (Nome: %s).",
-								clienteCpfCnpjJaCadastrado.get().getNome()));
-			}
-		}
+		validarUnicidadeCpfCnpj(dto.cpf_cnpj(), null);
+		validarUnicidadeEmail(dto.email(), null);
 
 		// 1. Criar entidade Cliente
 		Cliente novoCliente = new Cliente();
-		novoCliente.setNome(dto.nome_cliente());
-		novoCliente.setEmail(dto.email());
+		novoCliente.setPessoa(new Pessoa(dto.nome_cliente(), dto.email()));
 		novoCliente.setCelular(dto.celular());
 		novoCliente.setTelefone(dto.telefone());
 		novoCliente.setRg(dto.rg());
@@ -210,15 +273,16 @@ public class ClienteService {
 
 		// 2. Mapear endereço do DTO (se ele existir e não estiver vazio)
 		if (dto.endereco() != null && !isEnderecoEmpty(dto.endereco())) {
+			Cep dadosCep = resolverOuCriarCep(
+					dto.endereco().cep(),
+					dto.endereco().uf(),
+					dto.endereco().cidade(),
+					dto.endereco().bairro(),
+					dto.endereco().logradouro());
 
-			// Dados do CEP
-			Cep dadosCep = new Cep();
-			// Campos da tb_cep
-			dadosCep.setCep(dto.endereco().cep());
-			dadosCep.setUf(dto.endereco().uf());
-			dadosCep.setCidade(dto.endereco().cidade());
-			dadosCep.setBairro(dto.endereco().bairro());
-			dadosCep.setLogradouro(dto.endereco().logradouro());
+			if (dadosCep == null) {
+				throw new BusinessValidationException("CEP é obrigatório para o endereço.");
+			}
 
 			// Endereço completo
 			Endereco endereco = new Endereco();
@@ -239,80 +303,59 @@ public class ClienteService {
 	// ===================== ATUALIZAR =======================
 
 	/**
-	 * Atualizar cliente existente
+	 * Atualizar cliente existente (suporta atualização parcial com distinção entre campo omitido e {@code null} explícito)
 	 */
 	@Transactional
 	public ResponseClienteDTO atualizar(Long id, UpdateClienteDTO dto) {
 		Cliente cliente = repository.findById(id)
 				.orElseThrow(() -> new ResourceNotFoundException("Cliente não encontrado com ID: " + id));
 
-		if (dto.cpf_cnpj().isPresent() && dto.cpf_cnpj().get() != null && !dto.cpf_cnpj().get().isBlank()) {
-			String cpfCnpjClean = dto.cpf_cnpj().get().replaceAll("[^0-9]", "");
-			Optional<Cliente> clienteExistente = queryRepository.findByCpfCnpjClean(cpfCnpjClean);
-			if (clienteExistente.isPresent() && clienteExistente.get().getCod_cliente() != cliente.getCod_cliente()) {
-				throw new DuplicateResourceException(
-						String.format("Já existe um cliente cadastrado com esse CPF/CNPJ (Nome: %s).",
-								clienteExistente.get().getNome()));
+		if (dto.nome_cliente().isPresent()) {
+			String novoNome = dto.nome_cliente().get();
+			if (novoNome == null || novoNome.isBlank()) {
+				throw new BusinessValidationException("Nome é obrigatório");
+			}
+			cliente.setNome(novoNome);
+		}
+
+		if (dto.cpf_cnpj().isPresent()) {
+			String novoCpfCnpj = dto.cpf_cnpj().get();
+			validarUnicidadeCpfCnpj(novoCpfCnpj, cliente.getCodCliente());
+			cliente.setCpf_cnpj(novoCpfCnpj);
+		}
+
+		if (dto.email().isPresent()) {
+			String novoEmail = dto.email().get();
+			if (novoEmail != null && !novoEmail.isBlank()) {
+				Long codPessoa = cliente.getPessoa() != null ? cliente.getPessoa().getCodPessoa() : null;
+				validarUnicidadeEmail(novoEmail, codPessoa);
+				cliente.setEmail(novoEmail);
+			} else {
+				if (possuiAcessoAtivo(id)) {
+					throw new BusinessValidationException(
+							"Não é possível remover o e-mail de um cliente que possui acesso ativo ao sistema.");
+				}
+				cliente.setEmail(null);
 			}
 		}
 
-		// 1- Atualizar os campos básicos do cliente (apenas os fornecidos (Optional))
-		dto.nome_cliente().ifPresent(cliente::setNome);
-		dto.email().ifPresent(cliente::setEmail);
 		dto.celular().ifPresent(cliente::setCelular);
 		dto.telefone().ifPresent(cliente::setTelefone);
 		dto.rg().ifPresent(cliente::setRg);
-		dto.cpf_cnpj().ifPresent(cliente::setCpf_cnpj);
 		dto.data_nascimento().ifPresent(cliente::setNascimento);
-		dto.tipo().ifPresent(cliente::setTipo);
 
-		// 2- Atualizar o bloco de endereço, se ele estiver presente na requisição
-		dto.endereco().ifPresent(enderecoDto -> {
-
-			// Verifica se todos os campos do endereço estão vazios/nulos
-			// Nesse caso, o usuário quer remover o endereço do cliente
-			boolean todosOsCamposVazios = enderecoDto.cep().map(str -> str.isBlank()).orElse(true) &&
-					enderecoDto.logradouro().map(str -> str.isBlank()).orElse(true) &&
-					enderecoDto.bairro().map(str -> str.isBlank()).orElse(true) &&
-					enderecoDto.cidade().map(str -> str.isBlank()).orElse(true) &&
-					enderecoDto.uf().map(str -> str.isBlank()).orElse(true) &&
-					enderecoDto.complemento().map(str -> str.isBlank()).orElse(true) &&
-					enderecoDto.numero().isEmpty();
-
-			if (todosOsCamposVazios) {
-				// Remove a referência ao endereço no cliente
-				// O CascadeType.ALL garante que o registro em tb_endereco (e tb_cep via
-				// cascade) também será excluído
-				cliente.setEndereco(null);
-				return;
+		if (dto.tipo().isPresent()) {
+			Character novoTipo = dto.tipo().get();
+			if (novoTipo == null || (novoTipo != 'F' && novoTipo != 'J')) {
+				throw new BusinessValidationException("Tipo de cliente inválido. Valores permitidos: 'F' ou 'J'.");
 			}
+			cliente.setTipo(novoTipo);
+		}
 
-			Endereco enderecoAtual = cliente.getEndereco();
-
-			// Se o cliente não possuía endereço, cria um novo
-			if (enderecoAtual == null) {
-				enderecoAtual = new Endereco();
-				cliente.setEndereco(enderecoAtual);
-			}
-
-			// Atualiza os campos da tabela tb_endereco
-			enderecoDto.numero().ifPresent(enderecoAtual::setNumero);
-			enderecoDto.complemento().ifPresent(enderecoAtual::setComplemento);
-
-			// Verifica e inicializa a entidade Cep, se necessário
-			Cep cepAtual = enderecoAtual.getCep();
-			if (cepAtual == null) {
-				cepAtual = new Cep();
-				enderecoAtual.setCep(cepAtual);
-			}
-
-			// Atualiza os campos da tabela tb_cep
-			cepAtual.setCep(enderecoDto.cep().orElse(null));
-			enderecoDto.logradouro().ifPresent(cepAtual::setLogradouro);
-			enderecoDto.bairro().ifPresent(cepAtual::setBairro);
-			enderecoDto.cidade().ifPresent(cepAtual::setCidade);
-			enderecoDto.uf().ifPresent(cepAtual::setUf);
-		});
+		// Atualizar o bloco de endereço apenas se ele estiver presente na requisição
+		if (dto.endereco().isPresent()) {
+			atualizarEndereco(cliente, dto.endereco().get());
+		}
 
 		// Salvar e retornar como DTO
 		Cliente atualizado = repository.save(cliente);
@@ -322,7 +365,7 @@ public class ClienteService {
 	// ===================== DELETAR =======================
 
 	/**
-	 * Deletar cliente por ID
+	 * Deletar cliente por ID (soft-delete com cascata para veículos, OS, usuário e pessoa)
 	 */
 	@Transactional
 	public void deletar(Long id) {
@@ -337,6 +380,14 @@ public class ClienteService {
 
 		String sqlCascadeVeiculo = "UPDATE tb_veiculo SET deleted_at = CURRENT_TIMESTAMP WHERE fk_cod_cliente = ? AND deleted_at IS NULL";
 		jdbcTemplate.update(sqlCascadeVeiculo, id);
+
+		// Soft Delete Cascade para Usuário vinculado ao Cliente
+		// Usa o mecanismo JPA (@SQLDelete) para garantir consistência com o soft-delete da entidade Usuario
+		usuarioRepository.findByClienteId(id).ifPresent(usuarioRepository::delete);
+
+		// Soft Delete Cascade para Pessoa vinculada ao Cliente
+		String sqlCascadePessoa = "UPDATE tb_pessoa SET deleted_at = CURRENT_TIMESTAMP WHERE cod_pessoa = (SELECT fk_cod_pessoa FROM tb_cliente WHERE cod_cliente = ?) AND deleted_at IS NULL";
+		jdbcTemplate.update(sqlCascadePessoa, id);
 	}
 
 	// ===================== MÉTODOS PRIVADOS =======================
@@ -363,7 +414,6 @@ public class ClienteService {
 					(String) map.get("cidade"),
 					(String) map.get("logradouro"));
 		} catch (Exception e) {
-			System.out.println("Erro ao carregar endereço: " + e.getMessage());
 			e.printStackTrace();
 			return null;
 		}
@@ -374,12 +424,13 @@ public class ClienteService {
 	 */
 	private List<ResponseVeiculoDTO> carregarVeiculosDTO(Long clienteId) {
 		try {
-			String sql = "SELECT v.cod_veiculo, mo.nome_montadora as montadora, m.nome_modelo as modelo, v.ano, v.placa, v.cor, v.combustivel, v.tipo, v.fk_cod_cliente, c.nome_cliente as nome_cliente "
-					+
+			// Após unificação: nome_cliente migrou para tb_pessoa.nome
+			String sql = "SELECT v.cod_veiculo, mo.nome_montadora as montadora, m.nome_modelo as modelo, v.ano, v.placa, v.cor, v.combustivel, v.tipo, v.fk_cod_cliente, p.nome as nome_cliente " +
 					"FROM tb_veiculo v " +
 					"JOIN tb_modelo m ON v.fk_cod_modelo = m.cod_modelo " +
 					"JOIN tb_montadora mo ON m.fk_cod_montadora = mo.cod_montadora " +
 					"LEFT JOIN tb_cliente c ON v.fk_cod_cliente = c.cod_cliente " +
+					"LEFT JOIN tb_pessoa p ON c.fk_cod_pessoa = p.cod_pessoa " +
 					"WHERE v.fk_cod_cliente = ? AND v.deleted_at IS NULL ORDER BY v.cod_veiculo DESC";
 
 			return jdbcTemplate.query(sql, (rs, rowNum) -> new ResponseVeiculoDTO(
@@ -410,41 +461,11 @@ public class ClienteService {
 		// if (dto.cpf_cnpj() == null || dto.cpf_cnpj().isBlank()) {
 		// throw new BusinessValidationException("CPF/CNPJ é obrigatório");
 		// }
-		// System.out.println("ClienteService.validarDadosCliente(): Passei pelo
-		// cpf_cnpj");
 
 		// if (dto.tipo() == 'F' && (dto.nascimento() == null)) {
 		// throw new BusinessValidationException("Data de nascimento é obrigatória para
 		// pessoa física");
 		// }
-		// System.out.println("ClienteService.validarDadosCliente(): Passei pelo tipo e
-		// nascimento");
-	}
-
-	/**
-	 * Adaptar placa para formato Mercosul (novo padrão brasileiro)
-	 * 
-	 * Exemplos:
-	 * Caso seja passado no formato antigo: "ABC1234" -> "ABC1C34"
-	 * OU
-	 * Caso seja passado no formato Mercosul: "ABC1A34" -> "ABC1034"
-	 * 
-	 * Retorna a placa adaptada ou, se não for possível adaptar (ex: formato
-	 * inválido), retorna a original
-	 * Essa adaptação é necessária porque os clientes podem ter placas cadastradas
-	 * em ambos os formatos, e queremos garantir que a busca funcione
-	 * independentemente do formato fornecido pelo usuário.
-	 * A lógica de adaptação é baseada nas regras de formação das placas Mercosul,
-	 * onde a letra do meio (4ª posição) é substituída por um número específico, e
-	 * vice-versa.
-	 * 
-	 */
-	private String adaptarPlacaMercosul(String placa) {
-		try {
-			return ConsultaPorPlaca.adaptaPlacaParaFormatoInverso_MercosulAntigo(placa);
-		} catch (Exception e) {
-			return placa; // Retorna placa original se falhar
-		}
 	}
 
 	/**
@@ -458,5 +479,165 @@ public class ClienteService {
 				(dto.uf() == null || dto.uf().isBlank()) &&
 				(dto.complemento() == null || dto.complemento().isBlank()) &&
 				dto.numero() == null;
+	}
+
+	private void validarUnicidadeCpfCnpj(String cpfCnpj, Long excludeClienteId) {
+		if (cpfCnpj == null || cpfCnpj.isBlank()) {
+			return;
+		}
+		String cpfCnpjClean = cpfCnpj.replaceAll("[^0-9]", "");
+		if (cpfCnpjClean.isBlank()) {
+			return;
+		}
+		queryRepository.findByCpfCnpjClean(cpfCnpjClean).ifPresent(clienteExistente -> {
+			if (excludeClienteId == null || clienteExistente.getCodCliente() != excludeClienteId) {
+				throw new DuplicateResourceException(
+						String.format("Já existe um cliente cadastrado com esse CPF/CNPJ (Nome: %s).",
+								clienteExistente.getNome()));
+			}
+		});
+	}
+
+	private void validarUnicidadeEmail(String email, Long excludePessoaId) {
+		if (email == null || email.isBlank()) {
+			return;
+		}
+		String emailNormalizado = email.trim().toLowerCase();
+		boolean duplicado = excludePessoaId == null
+				? pessoaRepository.existsByEmailIgnoreCase(emailNormalizado)
+				: pessoaRepository.existsByEmailIgnoreCaseAndCodPessoaNot(emailNormalizado, excludePessoaId);
+		if (duplicado) {
+			throw new DuplicateResourceException("Já existe um cliente ou usuário cadastrado com esse e-mail.");
+		}
+	}
+
+	private boolean possuiAcessoAtivo(Long clienteId) {
+		return usuarioRepository.findByClienteId(clienteId)
+				.filter(u -> u.getDeletedAt() == null)
+				.isPresent();
+	}
+
+	private Cep resolverOuCriarCep(String cepRaw, String uf, String cidade, String bairro, String logradouro) {
+		String cepLimpo = cepRaw != null ? cepRaw.replaceAll("[^0-9]", "") : null;
+		if (cepLimpo == null || cepLimpo.isBlank()) {
+			return null;
+		}
+		return cepRepository.findByCep(cepLimpo).orElseGet(() -> {
+			Cep novo = new Cep();
+			novo.setCep(cepLimpo);
+			novo.setUf(uf);
+			novo.setCidade(cidade);
+			novo.setBairro(bairro);
+			novo.setLogradouro(logradouro);
+			return novo;
+		});
+	}
+
+	private void atualizarEndereco(Cliente cliente, UpdateClienteDTO.EnderecoDTO enderecoDto) {
+		if (enderecoDto == null) {
+			cliente.setEndereco(null);
+			return;
+		}
+
+		boolean todosPresentesVazios = isBlankOrNullIfPresent(enderecoDto.cep())
+				&& isBlankOrNullIfPresent(enderecoDto.logradouro())
+				&& isBlankOrNullIfPresent(enderecoDto.bairro())
+				&& isBlankOrNullIfPresent(enderecoDto.cidade())
+				&& isBlankOrNullIfPresent(enderecoDto.uf())
+				&& isBlankOrNullIfPresent(enderecoDto.complemento())
+				&& (!enderecoDto.numero().isPresent() || enderecoDto.numero().isNull());
+
+		// Remove o endereço apenas se o CEP foi explicitamente limpo/nulo (sem outros campos preenchidos)
+		// ou se o cliente ainda não tinha endereço e nenhum campo válido foi informado.
+		if (todosPresentesVazios && (enderecoDto.cep().isPresent() || cliente.getEndereco() == null)) {
+			cliente.setEndereco(null);
+			return;
+		}
+
+		boolean criandoNovo = (cliente.getEndereco() == null);
+		Endereco enderecoAtual = cliente.getEndereco();
+		if (enderecoAtual == null) {
+			enderecoAtual = new Endereco();
+		}
+
+		if (enderecoDto.numero().isPresent()) {
+			Integer numero = enderecoDto.numero().get();
+			if (numero == null) {
+				throw new BusinessValidationException("Número do endereço é obrigatório.");
+			}
+			enderecoAtual.setNumero(numero);
+		}
+
+		enderecoDto.complemento().ifPresent(enderecoAtual::setComplemento);
+
+		if (enderecoDto.cep().isPresent()) {
+			String cepRaw = enderecoDto.cep().get();
+			String novoCepStr = cepRaw != null ? cepRaw.replaceAll("[^0-9]", "") : null;
+			if (novoCepStr != null && !novoCepStr.isBlank()) {
+				Cep cepAtual = enderecoAtual.getCep();
+				if (cepAtual == null || !novoCepStr.equals(cepAtual.getCep())) {
+					Cep cepFinal = resolverOuCriarCep(
+							novoCepStr,
+							enderecoDto.uf().valueOr(null),
+							enderecoDto.cidade().valueOr(null),
+							enderecoDto.bairro().valueOr(null),
+							enderecoDto.logradouro().valueOr(null));
+					enderecoAtual.setCep(cepFinal);
+				} else {
+					atualizarCamposCepExistente(cepAtual, enderecoDto);
+				}
+			} else if (enderecoAtual.getCep() == null) {
+				throw new BusinessValidationException("CEP é obrigatório para o endereço.");
+			}
+		} else if (criandoNovo) {
+			// Novo endereço sem CEP informado — obrigatório
+			throw new BusinessValidationException("CEP é obrigatório para o endereço.");
+		} else if (enderecoAtual.getCep() != null) {
+			atualizarCamposCepExistente(enderecoAtual.getCep(), enderecoDto);
+		}
+
+		// Vincula o endereço ao cliente somente após todas as validações
+		if (criandoNovo) {
+			cliente.setEndereco(enderecoAtual);
+		}
+	}
+
+	private void atualizarCamposCepExistente(Cep cepAtual, UpdateClienteDTO.EnderecoDTO enderecoDto) {
+		if (enderecoDto.logradouro().isPresent()) {
+			String logradouro = enderecoDto.logradouro().get();
+			if (logradouro == null || logradouro.isBlank()) {
+				throw new BusinessValidationException("Logradouro é obrigatório.");
+			}
+			cepAtual.setLogradouro(logradouro);
+		}
+		if (enderecoDto.bairro().isPresent()) {
+			String bairro = enderecoDto.bairro().get();
+			if (bairro == null || bairro.isBlank()) {
+				throw new BusinessValidationException("Bairro é obrigatório.");
+			}
+			cepAtual.setBairro(bairro);
+		}
+		if (enderecoDto.cidade().isPresent()) {
+			String cidade = enderecoDto.cidade().get();
+			if (cidade == null || cidade.isBlank()) {
+				throw new BusinessValidationException("Cidade é obrigatória.");
+			}
+			cepAtual.setCidade(cidade);
+		}
+		if (enderecoDto.uf().isPresent()) {
+			String uf = enderecoDto.uf().get();
+			if (uf == null || uf.isBlank()) {
+				throw new BusinessValidationException("UF é obrigatória.");
+			}
+			cepAtual.setUf(uf);
+		}
+	}
+
+	private boolean isBlankOrNullIfPresent(PatchField<String> field) {
+		if (field.isOmitted()) {
+			return true;
+		}
+		String val = field.get();
+		return val == null || val.isBlank();
 	}
 }

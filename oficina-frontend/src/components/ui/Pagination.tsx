@@ -1,18 +1,18 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import Button from './Button';
-import { LuChevronLeft, LuChevronRight } from './Icons';
+import { ChevronLeftIcon, ChevronRightIcon } from './Icons';
 
 interface PaginationProps {
   currentPage: number;
   totalPages: number;
-  onPageChange: (page: number | ((prev: number) => number)) => void;
+  onPageChange: (page: number) => void;
 }
 
 const Pagination: React.FC<PaginationProps> = ({ currentPage, totalPages, onPageChange }) => {
   if (totalPages <= 1) return null;
 
-  // Função para gerar o array de páginas visíveis
-  const getVisiblePages = () => {
+  // Função para gerar o array de páginas visíveis (useMemo evita recalcular desnecessariamente a cada render)
+  const visiblePages = useMemo(() => {
     const pages: (number | string)[] = [];
     const maxVisible = 5; // Número máximo de botões numéricos visíveis
 
@@ -26,44 +26,47 @@ const Pagination: React.FC<PaginationProps> = ({ currentPage, totalPages, onPage
       let end = Math.min(totalPages - 1, currentPage + 1);
 
       // Ajusta os limites nas extremidades
-      if (currentPage <= 2) end = 4;
-      if (currentPage >= totalPages - 1) start = totalPages - 3;
+      if (currentPage <= 3) {
+        start = 2;
+        end = 4;
+      } else if (currentPage >= totalPages - 2) {
+        start = totalPages - 3;
+        end = totalPages - 1;
+      }
 
-      // Adiciona reticências antes do meio, se necessário
-      if (start > 2) pages.push('...');
+      // Adiciona reticências antes do meio, se houver um buraco maior que 1 número
+      if (start > 2) {
+        pages.push(start === 3 ? 2 : '...');
+      }
 
       // Adiciona as páginas do meio
       for (let i = start; i <= end; i++) pages.push(i);
 
       // Adiciona reticências depois do meio, se necessário
-      if (end < totalPages - 1) pages.push('...');
+      if (end < totalPages - 1) {
+        pages.push(end === totalPages - 2 ? totalPages - 1 : '...');
+      }
 
       // Sempre inclui a última página
       pages.push(totalPages);
     }
     return pages;
-  };
-
-  const handlePageChange = (page: number | string) => {
-    if (typeof page === 'number') {
-      onPageChange(page);
-    }
-  };
+  }, [currentPage, totalPages]);
 
   return (
     <div className="flex items-center justify-center gap-2 mt-4">
       {/* Botão Anterior */}
       <Button
         className="px-2"
-        onClick={() => onPageChange((p: number) => Math.max(1, p - 1))}
+        onClick={() => onPageChange(Math.max(1, currentPage - 1))}
         disabled={currentPage === 1}
         aria-label="Página anterior"
       >
-        <LuChevronLeft className="h-4 w-4" />
+        <ChevronLeftIcon className="h-4 w-4" />
       </Button>
 
       {/* Páginas Numéricas */}
-      {getVisiblePages().map((page, index) => {
+      {visiblePages.map((page, index) => {
         if (page === '...') {
           return (
             <span key={`dots-${index}`} className="px-3 py-1 text-gray-400 select-none">
@@ -76,10 +79,10 @@ const Pagination: React.FC<PaginationProps> = ({ currentPage, totalPages, onPage
         return (
           <Button
             key={page}
-            onClick={() => handlePageChange(page)}
+            onClick={() => onPageChange(page as number)}
             className={`px-3 min-w-[36px] h-9 transition-colors ${isCurrent
-                ? 'bg-blue-600 text-white hover:bg-blue-700' // Estilo do botão da página ativa
-                : 'bg-transparent !text-gray-700 hover:bg-gray-100'
+              ? 'bg-blue-600 text-white hover:bg-blue-700' // Estilo do botão da página ativa
+              : 'bg-transparent !text-gray-700 hover:bg-gray-100'
               }`}
             aria-current={isCurrent ? 'page' : undefined}
           >
@@ -91,65 +94,14 @@ const Pagination: React.FC<PaginationProps> = ({ currentPage, totalPages, onPage
       {/* Botão Próximo */}
       <Button
         className="px-2"
-        onClick={() => onPageChange((p: number) => Math.min(totalPages, p + 1))}
+        onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
         disabled={currentPage === totalPages}
         aria-label="Próxima página"
       >
-        <LuChevronRight className="h-4 w-4" />
+        <ChevronRightIcon className="h-4 w-4" />
       </Button>
     </div>
   );
 };
 
 export default Pagination;
-
-
-
-// Paginação simples com botões de primeira e última página
-// const Pagination = ({ currentPage, totalPages, onPageChange }) => {
-//   if (totalPages <= 1) return null;
-
-//   return (
-//     <div className="flex items-center justify-center gap-2">
-//       <Button
-//         className="px-2"
-//         onClick={() => onPageChange(1)}
-//         disabled={currentPage === 1}
-//         aria-label="Primeira página"
-//       >
-//         <LuChevronFirst className="h-4 w-4" />
-//       </Button>
-
-//       <Button
-//         className="px-2"
-//         onClick={() => onPageChange(p => Math.max(1, p - 1))}
-//         disabled={currentPage === 1}
-//         aria-label="Página anterior"
-//       >
-//         <LuChevronLeft className="h-4 w-4" />
-//       </Button>
-
-//       <span className="text-sm font-medium text-gray-700 mx-3 select-none">
-//         Página {currentPage} de {totalPages}
-//       </span>
-
-//       <Button
-//         className="px-2"
-//         onClick={() => onPageChange(p => Math.min(totalPages, p + 1))}
-//         disabled={currentPage === totalPages}
-//         aria-label="Próxima página"
-//       >
-//         <LuChevronRight className="h-4 w-4" />
-//       </Button>
-
-//       <Button
-//         className="px-2"
-//         onClick={() => onPageChange(totalPages)}
-//         disabled={currentPage === totalPages}
-//         aria-label="Última página"
-//       >
-//         <LuChevronLast className="h-4 w-4" />
-//       </Button>
-//     </div>
-//   );
-// };

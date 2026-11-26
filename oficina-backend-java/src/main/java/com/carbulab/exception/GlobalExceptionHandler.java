@@ -4,6 +4,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -130,6 +131,20 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
     }
 
+    @ExceptionHandler(ClienteAccessException.class)
+    public ResponseEntity<ApiError> handleClienteAccessException(ClienteAccessException ex, HttpServletRequest request) {
+        ApiError error = new ApiError(
+            Instant.now(),
+            HttpStatus.BAD_REQUEST.value(),
+            "Bad Request",
+            ex.getMessage(),
+            request.getRequestURI(),
+            List.of()
+        );
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+    }
+
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiError> handleIllegalArgumentException(IllegalArgumentException ex, HttpServletRequest request) {
         ApiError error = new ApiError(
@@ -145,11 +160,15 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiError> handleMethodArgumentNotValidException(MethodArgumentNotValidException ex, HttpServletRequest request) {
-        List<String> errors = ex.getBindingResult()
-                .getFieldErrors()
-                .stream()
-                .map(error -> error.getField() + ": " + error.getDefaultMessage())
-                .toList();
+        List<String> errors = new java.util.ArrayList<>();
+        
+        ex.getBindingResult().getFieldErrors().forEach(error -> 
+            errors.add(error.getField() + ": " + error.getDefaultMessage())
+        );
+
+        ex.getBindingResult().getGlobalErrors().forEach(error -> 
+            errors.add(error.getObjectName() + ": " + error.getDefaultMessage())
+        );
         
         ApiError error = new ApiError(
             Instant.now(),
@@ -216,6 +235,32 @@ public class GlobalExceptionHandler {
             List.of(ex.getMostSpecificCause().getMessage())
         );
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+    }
+
+    @ExceptionHandler(TermosNaoAceitosException.class)
+    public ResponseEntity<ApiError> handleTermosNaoAceitosException(TermosNaoAceitosException ex, HttpServletRequest request) {
+        ApiError error = new ApiError(
+            Instant.now(),
+            HttpStatus.FORBIDDEN.value(),
+            "Forbidden",
+            ex.getMessage(),
+            request.getRequestURI(),
+            List.of("TERMOS_NAO_ACEITOS")
+        );
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error);
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiError> handleAccessDeniedException(AccessDeniedException ex, HttpServletRequest request) {
+        ApiError error = new ApiError(
+            Instant.now(),
+            HttpStatus.FORBIDDEN.value(),
+            "Forbidden",
+            "Você não tem permissão para acessar este recurso.",
+            request.getRequestURI(),
+            List.of(ex.getMessage() != null ? ex.getMessage() : "Acesso Negado")
+        );
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error);
     }
 
     @ExceptionHandler(Exception.class)

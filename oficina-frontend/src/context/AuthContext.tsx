@@ -1,9 +1,15 @@
 import React, { createContext, useState, useEffect, useMemo, ReactNode } from 'react';
 
+// Roles disponíveis no sistema (espelho do enum UsuarioFuncao do backend)
+export type UserFuncao = 'ADMIN' | 'MECANICO' | 'CLIENTE';
+
 // Define a estrutura do objeto de usuário
 export interface User {
+  id?: number;
   nome_usuario: string;
-  // funcao_usuario: string;
+  login?: string;
+  funcao: UserFuncao;
+  cod_cliente?: number | null;
   [key: string]: any;
 }
 

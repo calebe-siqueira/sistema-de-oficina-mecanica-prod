@@ -1,5 +1,6 @@
 package com.carbulab.infra.security;
 
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -24,6 +25,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  */
 @Configuration
 @EnableWebSecurity
+@EnableMethodSecurity
 public class SecurityConfig {
 
     private final SecurityFilter securityFilter;
@@ -40,11 +42,25 @@ public class SecurityConfig {
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)) // Define política de sessão como STATELESS (sem guardar estado na memória do servidor, utilizando apenas o token para autenticação)
             
             .authorizeHttpRequests(authorize -> authorize
-                .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/refresh", "/api/auth/logout").permitAll() // Permite POST em login, refresh e logout sem token
-                .requestMatchers(HttpMethod.POST, "/api/auth/register").hasRole("ADMIN")
+				// Liberações públicas (sem token)
+                .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/refresh", "/api/auth/logout", "/api/auth/recuperar-senha/**").permitAll() // Permite login, refresh, logout e recuperação de senha sem token
+                .requestMatchers(HttpMethod.GET, "/api/termos/atual").permitAll() // Permite consulta pública aos termos de uso vigentes
                 .anyRequest().authenticated() // Todas as outras requisições precisam de token
+
+				// A segurança refinada é realizada no Controller, nas anotações dos métodos
             )
             .addFilterBefore(securityFilter, UsernamePasswordAuthenticationFilter.class)
+			.headers(headers -> headers
+				.contentSecurityPolicy(csp -> csp
+					.policyDirectives(
+						"default-src 'self'; " +
+						"script-src 'self'; " +
+						"style-src 'self' 'unsafe-inline'; " +
+						"img-src 'self' data: https:; " +
+						"connect-src 'self' 'localhost:3001' 'localhost:8080' 'https://oficina-mecanica-api.nohalls.com'; " +
+						"frame-ancestors 'none';")
+				)
+			)
             
             .build();
     }

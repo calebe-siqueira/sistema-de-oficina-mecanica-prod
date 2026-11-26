@@ -12,7 +12,8 @@ class CNPJ {
   private static readonly pesosDV: number[] = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
   private static readonly cnpjZerado: string = "00000000000000";
 
-  static isValid(cnpj: string): boolean {
+  static isValid(cnpj: string | null | undefined): boolean {
+    if (!cnpj) return false;
     if (!this.regexCaracteresNaoPermitidos.test(cnpj)) {
       let cnpjSemMascara = this.removeMascaraCNPJ(cnpj);
       if (this.regexCNPJ.test(cnpjSemMascara) && cnpjSemMascara !== CNPJ.cnpjZerado) {
@@ -49,7 +50,7 @@ class CNPJ {
   }
 }
 
-export const isValidCnpj = (cnpj: string): boolean => {
+export const isValidCnpj = (cnpj: string | null | undefined): boolean => {
   return CNPJ.isValid(cnpj);
 };
 
@@ -84,7 +85,7 @@ export const isValidCpf = (cpf: string | null | undefined): boolean => {
 };
 
 // Validar CPF ou CNPJ baseado no tipo do cliente
-export const isValidCpfCnpj = (documentValue: string | null | undefined, tipo: string): boolean => {
+export const isValidCpfCnpj = (documentValue: string | null | undefined, tipo: string | null | undefined): boolean => {
   if (!documentValue) {
     return true; // Se não tiver valor, é válido
   }
@@ -132,6 +133,47 @@ export const isValidPhone = (value: string | null | undefined): boolean => {
 
   // Deve ter 10 (celulares antigos/fixos) ou 11 dígitos (celulares novos)
   return digits.length >= 10 && digits.length <= 11;
+};
+
+export interface PhoneValidationResult {
+  isValid: boolean;
+  atLeastOneIsValid: boolean;
+  celularInvalid: boolean;
+  telefoneInvalid: boolean;
+}
+
+export const isValidClientPhones = (
+  celular?: string | null,
+  telefone?: string | null
+): PhoneValidationResult => {
+  const cel = (celular || '').trim();
+  const tel = (telefone || '').trim();
+
+  // Filtra apenas os números preenchidos em um array
+  const filled = [cel, tel].filter(Boolean);
+
+  // Valida se tem pelo menos um número preenchido e se todos os preenchidos são válidos
+  const isValid = filled.length > 0 && filled.every(isValidPhone);
+  // Valida se pelo menos um dos números preenchidos é válido
+  const atLeastOneIsValid = filled.some(isValidPhone)
+
+  // Se ambos estão vazios, ambos ficam inválidos (pois 1 é obrigatório)
+  if (filled.length === 0) {
+    return {
+      isValid: false,
+      atLeastOneIsValid: false,
+      celularInvalid: true,
+      telefoneInvalid: true,
+    };
+  }
+
+  // Se pelo menos um foi preenchido, só marca erro no campo que estiver preenchido e inválido
+  return {
+    isValid,
+    atLeastOneIsValid,
+    celularInvalid: Boolean(cel) && !isValidPhone(cel),
+    telefoneInvalid: Boolean(tel) && !isValidPhone(tel),
+  };
 };
 
 // --- Validadores de Endereço ---

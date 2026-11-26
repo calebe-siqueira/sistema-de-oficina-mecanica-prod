@@ -1,6 +1,12 @@
 import React from 'react';
 import { TableEmptyState } from '../components/modules/TableEmptyState';
-import { maskCpf, maskCnpj, maskPhone, maskPlaca } from '../utils/masks';
+import { maskCpfCnpj, maskPhone, maskPlaca } from '../utils/masks';
+import {
+  StickyTableContainer,
+  StickyActionHeader,
+  StickyActionCell,
+  StickyActionGroup
+} from '../components/ui/StickyTable';
 
 export interface ClientListProps {
   clients: any[];
@@ -14,45 +20,46 @@ const ClientList: React.FC<ClientListProps> = ({
   renderActions
 }) => {
   return (
-    <div className="overflow-x-auto">
-      <table className="min-w-full divide-y divide-gray-200 table-fixed">
+    <StickyTableContainer>
+      <table className="min-w-full table-fixed border-separate border-spacing-0">
         <thead className="bg-gray-50">
           <tr>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nome</th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">CPF/CNPJ</th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Contato (Cel/Tel)</th>
-            {searchType === 'placa' && <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Placa encontrada</th>}
-            <th className="sticky right-0 bg-gray-50 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase z-10 w-[66px] sm:w-[125px]">Ações</th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase border-b border-gray-200">Nome</th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase border-b border-gray-200">CPF/CNPJ</th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase border-b border-gray-200">Contato (Cel/Tel)</th>
+            {searchType === 'placa' && <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase border-b border-gray-200">Placa encontrada</th>}
+            {renderActions && <StickyActionHeader className="border-b border-gray-200">Ações</StickyActionHeader>}
           </tr>
         </thead>
-        <tbody className="bg-white divide-y divide-gray-200">
+        <tbody className="bg-white">
           {clients.length === 0 ? (
             <tr>
-              <td colSpan={searchType === 'placa' ? 5 : 4}>
+              <td colSpan={searchType === 'placa' ? (renderActions ? 5 : 4) : (renderActions ? 4 : 3)} className="border-b border-gray-200">
                 <TableEmptyState message='Nenhum cliente encontrado' />
               </td>
             </tr>
           ) : (
             clients.map(client => (
-              <tr key={client.cod_cliente} className="hover:bg-gray-50">
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{client.nome_cliente}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{client.tipo === 'F' ? maskCpf(client.cpf_cnpj) : maskCnpj(client.cpf_cnpj)}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{client.celular ? maskPhone(client.celular) : (maskPhone(client.telefone) || '-')}</td>
+              <tr key={client.cod_cliente} className="hover:bg-gray-50 group">
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 border-b border-gray-200">{client.nome_cliente}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 border-b border-gray-200">{maskCpfCnpj(client.cpf_cnpj, client.tipo) || '-'}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 border-b border-gray-200">{client.celular ? maskPhone(client.celular) : (maskPhone(client.telefone) || '-')}</td>
                 {searchType === 'placa' && (
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800 font-bold">{maskPlaca(client.placa_encontrada) || '-'}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800 font-bold border-b border-gray-200">{maskPlaca(client.placa_encontrada) || '-'}</td>
                 )}
-                <td className="sticky right-0 bg-transparent px-4 py-3 text-sm font-medium w-[125px] text-left z-10">
-                  <div className="flex flex-col w-[66px] sm:min-w-[125px] sm:flex-row sm:items-center gap-2">
-                    {/* Injeta dinamicamente o botão e a ação que será renderizada para cada item da lista de clientes (OCP) */}
-                    {renderActions && renderActions(client)}
-                  </div>
-                </td>
+                {renderActions && (
+                  <StickyActionCell className="border-b border-gray-200">
+                    <StickyActionGroup>
+                      {renderActions(client)}
+                    </StickyActionGroup>
+                  </StickyActionCell>
+                )}
               </tr>
             ))
           )}
         </tbody>
       </table>
-    </div>
+    </StickyTableContainer>
   );
 };
 

@@ -1,9 +1,6 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useApi } from './useApi';
 import { toastify } from '../components/modules/SystemMessages';
-import { formatSafeDate } from '../utils/date';
-import { matchesNumber } from '../utils/filters';
-
 import { ResponseOsDTO } from '../types/ordem_servico';
 
 export interface UseServiceOrdersOptions {
@@ -13,114 +10,107 @@ export interface UseServiceOrdersOptions {
   startDate?: string;
   endDate?: string;
   filterStatus?: string;
+  page?: number;
+  size?: number;
 }
 
 export interface UseServiceOrdersReturn {
   orders: ResponseOsDTO[];
-  filteredOrders: ResponseOsDTO[];
   loading: boolean;
   error: string | null;
   fetchOrders: () => Promise<void>;
+  totalPages: number;
+  totalElements: number;
 }
 
+/**
+ * Hook unificado para busca e gerenciamento paginado de Ordens de Serviço.
+ * Toda a busca, filtragem e paginação ocorrem no backend via /os/search.
+ */
 export function useServiceOrders(options: UseServiceOrdersOptions = {}): UseServiceOrdersReturn {
-  const { clientId = null, searchType = '', searchTerm = '', startDate = '', endDate = '', filterStatus = 'Todas' } = options;
+  const {
+    clientId = null,
+    searchType = '',
+    searchTerm = '',
+    startDate = '',
+    endDate = '',
+    filterStatus = 'Todas',
+    page = 1,
+    size = 25
+  } = options;
+
   const [orders, setOrders] = useState<ResponseOsDTO[]>([]);
+  const [totalPages, setTotalPages] = useState<number>(1);
+  const [totalElements, setTotalElements] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string>('');
+  const [error, setError] = useState<string | null>(null);
   const api = useApi();
+
+  const prevServerParamsRef = useRef<string>('');
 
   const fetchOrders = useCallback(async () => {
     if (clientId === 'new') {
       setLoading(false);
       setOrders([]);
+      setTotalPages(1);
+      setTotalElements(0);
       return;
     }
+
     setLoading(true);
     try {
-      const url = clientId ? `/clientes/${clientId}/os` : '/os';
+      let url = `/os/search?page=${page - 1}&size=${size}`;
+      if (clientId) url += `&clienteId=${clientId}`;
+      if (searchType && searchType !== 'intervalo_data') url += `&type=${searchType}`;
+      if (searchTerm) url += `&term=${encodeURIComponent(searchTerm)}`;
+      if (startDate) url += `&dataInicio=${startDate}`;
+      if (endDate) url += `&dataFim=${endDate}`;
+      if (filterStatus && filterStatus !== 'Todas') url += `&status=${filterStatus}`;
+
       const d = await api(url);
-      setOrders(Array.isArray(d) ? d as ResponseOsDTO[] : []);
-      setError('');
+      if (d && d.content) {
+        setOrders(d.content);
+        setTotalPages(d.total_pages || 1);
+        setTotalElements(d.total_elements || 0);
+      } else {
+        setOrders(Array.isArray(d) ? (d as ResponseOsDTO[]) : []);
+        setTotalPages(1);
+        setTotalElements(0);
+      }
+      setError(null);
     } catch (err: any) {
-      const errorMessage = err.message || "Erro ao carregar OS. Verifique sua conexão e tente novamente.";
+      const errorMessage = err.message || 'Erro ao carregar OS. Verifique sua conexão e tente novamente.';
       setError(errorMessage);
       toastify.errorMessage(errorMessage, err);
     } finally {
       setLoading(false);
     }
-  }, [clientId, api]);
+  }, [clientId, page, size, searchType, searchTerm, startDate, endDate, filterStatus, api]);
 
   useEffect(() => {
-    fetchOrders();
-  }, [fetchOrders]);
-
-  const filteredOrders = useMemo(() => {
-    let res = orders;
-
-    // Filtra por status primeiro
-    if (filterStatus && filterStatus !== 'Todas') {
-      if (filterStatus.startsWith('pag_')) {
-        const pagType = filterStatus.split('_')[1];
-        res = res.filter(o => {
-          const total = parseFloat(String(o.valor_total)) || 0;
-          let desc = 0; const dVal = parseFloat(String(o.desconto)) || 0;
-          if (o.tipo_desconto === 'P') desc = total * (dVal / 100);
-          else if (o.tipo_desconto === 'V') desc = dVal;
-          const finalTotal = Math.max(0, total - desc);
-          const pago = parseFloat(String(o.valor_pago)) || 0;
-
-          if (pagType === 'pago') return pago >= finalTotal && finalTotal > 0;
-          if (pagType === 'pendente') return pago === 0 && finalTotal > 0;
-          if (pagType === 'parcial') return pago > 0 && pago < finalTotal;
-          return false;
-        });
-      } else {
-        res = res.filter(o => String(o.status_servico) === filterStatus);
+    // Para busca por intervalo de datas, a busca automática só ocorre quando
+    // ambas as datas estão preenchidas (ou ambas limpas)
+    if (searchType === 'intervalo_data') {
+      const bothFilled = Boolean(startDate && endDate);
+      const neitherFilled = Boolean(!startDate && !endDate);
+      if (!bothFilled && !neitherFilled) {
+        return;
       }
     }
 
-    // Filtra por termo (de acordo com o tipo)
-    if (searchType === 'intervalo_data' && startDate && endDate) {
-      res = res.filter(os => {
-        if (!os.data_os) return false;
-        const osDate = formatSafeDate(os.data_os);
-        return osDate >= startDate && osDate <= endDate;
-      });
-    } else if (searchType === 'data' && searchTerm) {
-      res = res.filter(os => {
-        if (!os.data_os) return false;
-        const osDate = formatSafeDate(os.data_os);
-        return osDate === searchTerm;
-      });
-    } else if (searchType !== 'intervalo_data' && searchType !== 'data' && searchTerm) {
-      const term = searchTerm.toLowerCase();
-      res = res.filter(os => {
-        switch (searchType) {
-          // Dados do veículo
-          case 'placa': return (os.placa || '').toLowerCase().includes(term);
-          case 'modelo': return (os.modelo?.nome_modelo || '').toLowerCase().includes(term);
-          case 'montadora': return (os.modelo?.montadora?.nome_montadora || '').toLowerCase().includes(term);
-          case 'ano': return matchesNumber(os.ano, term);
-          case 'cor': return (os.cor || '').toLowerCase().includes(term);
-          case 'cod_veiculo': return matchesNumber(os.fk_cod_veiculo, term);
-          // Dados da OS
-          case 'cod_os': return matchesNumber(os.cod_os, term);
-          // Dados do cliente
-          case 'nome_cliente': return (os.nome_cliente || '').toLowerCase().includes(term);
-          default: return true;
-        }
-      });
+    const serverKey = `${clientId || ''}_${searchType}_${searchTerm}_${startDate}_${endDate}_${filterStatus}_${page}_${size}`;
+    if (prevServerParamsRef.current !== serverKey) {
+      prevServerParamsRef.current = serverKey;
+      fetchOrders();
     }
-
-    return res;
-  }, [orders, searchType, searchTerm, startDate, endDate, filterStatus]);
+  }, [clientId, searchType, searchTerm, startDate, endDate, filterStatus, page, size, fetchOrders]);
 
   return {
     orders,
-    filteredOrders,
     loading,
     error,
-    fetchOrders
+    fetchOrders,
+    totalPages,
+    totalElements
   };
 }

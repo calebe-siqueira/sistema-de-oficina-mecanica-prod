@@ -1,41 +1,65 @@
 package com.carbulab.dto.cliente;
 
 import java.time.LocalDate;
-import java.util.Optional;
 
 import org.springframework.format.annotation.DateTimeFormat;
 
+import com.carbulab.dto.common.PatchField;
 import com.fasterxml.jackson.annotation.JsonFormat;
 
+import jakarta.validation.Valid;
+
 /**
- * DTO para atualização de cliente
- * 
- * Todos os campos são opcionais (Optional), permitindo atualizações parciais
+ * DTO para atualização parcial de cliente.
+ *
+ * <p>Utiliza {@link PatchField} para distinguir campos omitidos na requisição
+ * de campos enviados explicitamente com valor {@code null}.</p>
  */
 public record UpdateClienteDTO(
-    Optional<String> nome_cliente,
-    Optional<String> email,
-    Optional<String> celular,
-    Optional<String> telefone,
-    Optional<String> rg,
-    Optional<String> cpf_cnpj,
+    PatchField<String> nome_cliente,
+    PatchField<String> email,
+    PatchField<String> celular,
+    PatchField<String> telefone,
+    PatchField<String> rg,
+    PatchField<String> cpf_cnpj,
     @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd")
     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
-    Optional<LocalDate> data_nascimento,
-    Optional<Character> tipo,
-    Optional<EnderecoDTO> endereco
+    PatchField<LocalDate> data_nascimento,
+    PatchField<Character> tipo,
+    PatchField<@Valid EnderecoDTO> endereco
 ) {
-    
+    public UpdateClienteDTO {
+        nome_cliente = PatchField.safe(nome_cliente);
+        email = PatchField.safe(email);
+        celular = PatchField.safe(celular);
+        telefone = PatchField.safe(telefone);
+        rg = PatchField.safe(rg);
+        cpf_cnpj = PatchField.safe(cpf_cnpj);
+        data_nascimento = PatchField.safe(data_nascimento);
+        tipo = PatchField.safe(tipo);
+        endereco = PatchField.safe(endereco);
+    }
+
     /**
-     * DTO para dados de endereço (atualização)
+     * DTO para dados de endereço (atualização parcial).
      */
     public record EnderecoDTO(
-        Optional<String> cep,
-        Optional<String> logradouro,
-        Optional<Integer> numero,
-        Optional<String> complemento,
-        Optional<String> bairro,
-        Optional<String> cidade,
-        Optional<String> uf
-    ) {}
+        PatchField<String> cep,
+        PatchField<String> logradouro,
+        PatchField<Integer> numero,
+        PatchField<String> complemento,
+        PatchField<String> bairro,
+        PatchField<String> cidade,
+        PatchField<String> uf
+    ) {
+        public EnderecoDTO {
+            cep = PatchField.safe(cep);
+            logradouro = PatchField.safe(logradouro);
+            numero = PatchField.safe(numero);
+            complemento = PatchField.safe(complemento);
+            bairro = PatchField.safe(bairro);
+            cidade = PatchField.safe(cidade);
+            uf = PatchField.safe(uf);
+        }
+    }
 }

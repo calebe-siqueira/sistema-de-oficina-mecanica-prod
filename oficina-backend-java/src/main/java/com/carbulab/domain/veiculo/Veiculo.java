@@ -142,6 +142,9 @@ public abstract class Veiculo {
 	}
 
 	public void setPlaca(String placa) {
+        if (placa != null && placa.trim().isEmpty()) {
+            placa = null;
+        }
 		// Validação de placa: placa padrão antigo || placa padrão Mercosul;
 		if (placa != null) {
 			if (!placa.matches("[A-z]{3}[ -]?[0-9]{4}") && !placa.matches("[A-z]{3}[0-9]{1}[A-z]{1}[0-9]{2}")) {
@@ -158,6 +161,9 @@ public abstract class Veiculo {
 	}
 
 	public void setCor(String cor) {
+        if (cor != null && cor.trim().isEmpty()) {
+            cor = null;
+        }
 		this.cor = cor;
 	}
 
@@ -166,6 +172,9 @@ public abstract class Veiculo {
 	}
 
 	public void setCombustivel(String combustivel) {
+        if (combustivel != null && combustivel.trim().isEmpty()) {
+            combustivel = null;
+        }
 		this.combustivel = combustivel;
 	}
 

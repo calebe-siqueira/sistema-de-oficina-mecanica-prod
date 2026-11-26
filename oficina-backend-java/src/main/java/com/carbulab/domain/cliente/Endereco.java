@@ -46,7 +46,14 @@ public class Endereco {
     private String complemento;
 
     // Relação com a tabela tb_cep
-    @OneToOne(cascade = CascadeType.ALL)
+    @OneToOne(cascade = {CascadeType.PERSIST, CascadeType.MERGE})
     @JoinColumn(name = "fk_cod_cep", referencedColumnName = "cod_cep")
     private Cep cep;
+
+    public void setComplemento(String complemento) {
+        if (complemento != null && complemento.trim().isEmpty()) {
+            complemento = null;
+        }
+        this.complemento = complemento;
+    }
 }

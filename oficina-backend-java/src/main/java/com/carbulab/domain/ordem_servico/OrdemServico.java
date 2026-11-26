@@ -71,6 +71,13 @@ public class OrdemServico {
         osPeca.setOrdemServico(this);
     }
 
+    public void setDescricao(String descricao) {
+        if (descricao != null && descricao.trim().isEmpty()) {
+            descricao = null;
+        }
+        this.descricao = descricao;
+    }
+
     public String getDataFormatada() {
         DateTimeFormatter formatoData = DateTimeFormatter.ofPattern("dd/MM/yyyy");
         return this.getDataOs() != null ? this.getDataOs().format(formatoData) : null;
